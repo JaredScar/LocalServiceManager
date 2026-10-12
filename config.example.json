@@ -1,0 +1,30 @@
+{
+  "host": "127.0.0.1",
+  "port": 3090,
+  "allowedHosts": ["127.0.0.1:3090", "localhost:3090", "status.example.com"],
+  "allowControl": true,
+  "self": "svcdash",
+
+  "trustedIps": ["203.0.113.10"],
+  "expectedPublicPorts": ["80/tcp", "443/tcp", "443/udp"],
+
+  "sites": [
+    { "name": "Example",     "url": "https://example.com" },
+    { "name": "Example API", "url": "https://api.example.com" }
+  ],
+
+  "attackSources": {
+    "mariadbLog": "C:/Program Files/MariaDB 13.0/data/YOUR-HOSTNAME.err",
+    "caddyLogs": "C:/apps/Caddy/logs"
+  },
+
+  "services": [
+    { "name": "caddy",   "label": "Caddy",             "logs": ["C:/apps/Caddy/logs"],
+      "confirmNote": "The dashboard is served through Caddy, so this page will disconnect for a few seconds." },
+    { "name": "gitea",   "label": "Gitea",             "logs": ["C:/apps/gitea/log"] },
+    { "name": "my-api",  "label": "My API",            "logs": ["C:/apps/my-api/logs"] },
+    { "name": "MariaDB", "label": "MariaDB",           "logs": ["C:/Program Files/MariaDB 13.0/data/YOUR-HOSTNAME.err"],
+      "confirmNote": "Every app that uses the database loses its connection until MariaDB is running again." },
+    { "name": "svcdash", "label": "Service Dashboard", "logs": ["C:/apps/svcdash/logs"] }
+  ]
+}

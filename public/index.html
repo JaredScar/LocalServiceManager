@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Service Dashboard</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%2334d399'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>Service Dashboard</h1>
+      <p id="summary" class="muted">Loading…</p>
+    </div>
+    <div class="top-actions">
+      <span id="updated" class="muted small"></span>
+      <button id="theme" type="button" class="btn" aria-label="Change theme">Theme: Dark</button>
+      <button id="refresh" type="button" class="btn">Refresh</button>
+    </div>
+    <nav class="nav" aria-label="Pages">
+      <a href="#/services" data-nav="services">Services</a>
+      <a href="#/history" data-nav="history">History</a>
+      <a href="#/sites" data-nav="sites">Sites</a>
+      <a href="#/security" data-nav="security">Security <span id="nav-security-badge" class="nav-badge" hidden></span></a>
+    </nav>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <!-- Services -->
+    <div id="page-services" data-page="services">
+      <section id="system" class="stats" aria-label="Server resources" hidden></section>
+
+      <section id="services" class="grid" aria-label="Services"></section>
+
+      <section id="viewer" class="viewer" hidden aria-label="Log viewer">
+        <div class="viewer-head">
+          <h2 id="v-title"></h2>
+          <div id="v-files" class="tabs" role="tablist"></div>
+        </div>
+
+        <div class="toolbar">
+          <input id="filter" type="search" placeholder="Filter lines…  ( / )" autocomplete="off" spellcheck="false">
+          <select id="lines" aria-label="Lines to show">
+            <option value="200">200 lines</option>
+            <option value="500" selected>500 lines</option>
+            <option value="1000">1000 lines</option>
+            <option value="2000">2000 lines</option>
+          </select>
+          <label class="check"><input id="errorsOnly" type="checkbox"> Errors &amp; warnings</label>
+          <label class="check"><input id="auto" type="checkbox" checked> Auto-refresh</label>
+          <label class="check"><input id="follow" type="checkbox" checked> Follow</label>
+          <label class="check"><input id="raw" type="checkbox"> Raw</label>
+          <button id="download" type="button" class="btn btn-sm">Download</button>
+          <span id="v-meta" class="muted small"></span>
+        </div>
+
+        <div id="log" class="log" role="log" aria-live="off"></div>
+      </section>
+
+      <p id="empty-hint" class="muted hint">Select a service to view its logs.</p>
+    </div>
+
+    <!-- History -->
+    <div id="page-history" data-page="history" hidden>
+      <div class="page-head">
+        <h2>Last 24 hours</h2>
+        <p id="history-meta" class="muted small"></p>
+      </div>
+      <div class="chart-grid">
+        <section class="panel">
+          <h3>Server CPU</h3>
+          <div id="chart-cpu"></div>
+        </section>
+        <section class="panel">
+          <h3>Server memory</h3>
+          <div id="chart-mem"></div>
+        </section>
+      </div>
+      <h3 class="section-title">Services</h3>
+      <div id="history-services" class="multiples"></div>
+    </div>
+
+    <!-- Sites -->
+    <div id="page-sites" data-page="sites" hidden>
+      <div class="page-head">
+        <div>
+          <h2>Sites &amp; certificates</h2>
+          <p id="sites-meta" class="muted small">Checked every minute from this server.</p>
+        </div>
+        <button id="sites-check" type="button" class="btn">Check now</button>
+      </div>
+      <div id="sites-list" class="site-grid"></div>
+    </div>
+
+    <!-- Security -->
+    <div id="page-security" data-page="security" hidden>
+      <div class="page-head">
+        <div>
+          <h2>Security</h2>
+          <p id="security-meta" class="muted small"></p>
+        </div>
+      </div>
+      <div id="security-notes"></div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Exposed ports</h3>
+          <label class="check"><input id="ports-hide-local" type="checkbox" checked> Hide local-only</label>
+        </div>
+        <p class="muted small">Estimated from Windows Firewall rules. Your hosting provider's network firewall, if any, isn't visible from here.</p>
+        <div id="ports-summary" class="chips"></div>
+        <div class="table-wrap"><table id="ports-table" class="table"></table></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Attack summary · last 24 hours</h3>
+        </div>
+        <div id="attack-stats" class="stats"></div>
+        <div class="panel-head sub">
+          <h4>Failed attempts per hour</h4>
+          <label class="check"><input id="attack-table-toggle" type="checkbox"> Show as table</label>
+        </div>
+        <div id="attack-legend" class="legend"></div>
+        <div id="attack-chart"></div>
+        <div id="attack-hourly-table" class="table-wrap" hidden></div>
+
+        <div class="split">
+          <div>
+            <h4>Windows / RDP failed logins</h4>
+            <div id="table-windows" class="table-wrap"></div>
+          </div>
+          <div>
+            <h4>MariaDB login attempts</h4>
+            <div id="table-mariadb" class="table-wrap"></div>
+          </div>
+        </div>
+        <h4>Web probes (4xx and scanner paths)</h4>
+        <div id="table-web" class="table-wrap"></div>
+        <h4>Successful remote logins</h4>
+        <div id="table-success" class="table-wrap"></div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="confirm" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h3 id="confirm-title"></h3>
+      <p id="confirm-body"></p>
+      <div id="confirm-deps" hidden>
+        <p class="small muted">These depend on it and will also be <span id="confirm-deps-verb"></span>:</p>
+        <ul id="confirm-deps-list"></ul>
+      </div>
+      <p id="confirm-note" class="note" hidden></p>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn" type="submit">Cancel</button>
+        <button id="confirm-ok" value="ok" class="btn btn-danger" type="submit"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+  <script src="/charts.js"></script>
+  <script src="/app.js"></script>
+  <script src="/pages.js"></script>
+</body>
+</html>

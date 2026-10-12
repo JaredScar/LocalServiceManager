@@ -1,0 +1,12 @@
+# Your real config: domains, home IP, hostnames, and log paths.
+config.json
+
+# Runtime data written on the server
+state/
+collected/
+logs/
+*.log
+
+# Editors
+.idea/
+.vscode/
