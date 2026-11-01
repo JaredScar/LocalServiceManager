@@ -446,6 +446,7 @@ dialog .note {
   line-height: 18px;
   text-align: center;
 }
+.nav-badge.warn { background: var(--warn); color: #1b1404; }
 
 /* ---------- page layout ---------- */
 

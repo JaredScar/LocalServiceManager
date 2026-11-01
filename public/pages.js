@@ -163,7 +163,46 @@
       );
       $('chart-cpu').dataset.summary = cpu.now !== null ? `Now ${pct(cpu.now)} · peak ${pct(cpu.peak)} · avg ${pct(cpu.avg)}` : '';
       $('chart-mem').dataset.summary = mem.now !== null ? `Now ${mem.now.toFixed(1)}% · peak ${mem.peak.toFixed(1)}%` : '';
-      for (const id of ['chart-cpu', 'chart-mem']) {
+
+      const drives = Object.keys(d.system.disk || {});
+      const diskSeries = drives.map((drive, i) => ({
+        name: drive,
+        values: d.system.disk[drive],
+        color: SERIES[i % SERIES.length],
+      }));
+      const latestOf = (values) => {
+        for (let i = values.length - 1; i >= 0; i--) if (typeof values[i] === 'number') return values[i];
+        return null;
+      };
+      const diskValues = drives.flatMap((drive) => d.system.disk[drive]).filter((v) => typeof v === 'number');
+      const diskPeak = diskValues.length ? Math.max(...diskValues) : null;
+      const diskNow = drives
+        .map((drive) => {
+          const nowPct = latestOf(d.system.disk[drive]);
+          return nowPct === null ? null : `${drive} ${nowPct.toFixed(1)}%`;
+        })
+        .filter(Boolean);
+      const diskStarted = d.times.find((t, i) => drives.some((drive) => typeof d.system.disk[drive][i] === 'number'));
+      charts.push(
+        Charts.line($('chart-disk'), {
+          times: d.times,
+          series: diskSeries.length ? diskSeries : [{ name: 'Disk', values: [], color: SERIES[0] }],
+          from,
+          to,
+          yMax: 100,
+          format: pct,
+          ariaLabel: diskNow.length
+            ? `Disk use over the last 24 hours. Now ${diskNow.join(', ')}. Peak ${diskPeak ?? '—'}%.`
+            : 'Disk use over the last 24 hours. No samples yet.',
+        })
+      );
+      let diskSummary = diskNow.length ? `Now ${diskNow.join(' · ')} · peak ${diskPeak.toFixed(1)}%` : 'No disk samples yet.';
+      if (diskStarted && d.collectingSince && diskStarted > d.collectingSince + 10 * 60e3) {
+        diskSummary += ` Started ${new Date(diskStarted).toLocaleString()}.`;
+      }
+      $('chart-disk').dataset.summary = diskSummary;
+
+      for (const id of ['chart-cpu', 'chart-mem', 'chart-disk']) {
         const box = $(id).parentElement;
         let sum = box.querySelector('.chart-summary');
         if (!sum) {
@@ -266,12 +305,35 @@
       return { text: `Expires in ${days} day${days === 1 ? '' : 's'} (${when})${issuer}`, level };
     }
 
+    function siteProblem(site) {
+      if (site.last && site.last.up === false) return 'bad';
+      const cert = site.cert;
+      if (cert && cert.authorized === false) return 'bad';
+      if (cert && typeof cert.daysLeft === 'number' && cert.daysLeft <= 7) return 'bad';
+      if (cert && typeof cert.daysLeft === 'number' && cert.daysLeft <= 14) return 'warn';
+      return null;
+    }
+
+    function updateSitesBadge(list) {
+      const badge = $('nav-sites-badge');
+      if (!badge) return;
+      const problems = (list || []).map(siteProblem).filter(Boolean);
+      const bad = problems.some((level) => level === 'bad');
+      badge.hidden = problems.length === 0;
+      badge.classList.toggle('warn', problems.length > 0 && !bad);
+      badge.textContent = String(problems.length);
+      badge.title = bad
+        ? `${problems.length} site${problems.length === 1 ? '' : 's'} down or with a certificate due`
+        : `${problems.length} certificate${problems.length === 1 ? '' : 's'} expiring within 14 days`;
+    }
+
     function render(data) {
       destroy();
       const list = $('sites-list');
       list.replaceChildren();
       if (!data.sites.length) {
         list.append(el('div', 'log-note', 'No sites configured. Add a "sites" list to config.json.'));
+        updateSitesBadge([]);
         return;
       }
       const to = Date.now();
@@ -330,6 +392,7 @@
         );
       }
       $('sites-meta').textContent = `Checked every minute from this server · updated ${clock(Date.parse(data.generatedAt))}`;
+      updateSitesBadge(data.sites);
     }
 
     async function load() {
@@ -355,6 +418,19 @@
       }
     });
 
+    const badgeTick = async () => {
+      if (!document.hidden && !timer) {
+        try {
+          const data = await api('/api/sites');
+          updateSitesBadge(data.sites);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    setTimeout(badgeTick, 1500);
+    setInterval(badgeTick, 60e3);
+
     SD.registerPage('sites', {
       show() {
         load();
@@ -362,6 +438,7 @@
       },
       hide() {
         clearInterval(timer);
+        timer = null;
         destroy();
       },
       refresh: load,
@@ -397,6 +474,7 @@
       box.replaceChildren();
       const notes = [...(data.attacks ? data.attacks.notes : [])];
       for (const nt of notes) box.append(el('div', `notice ${nt.level}`, nt.text));
+      if (data.collectorError) box.prepend(el('div', 'notice bad', data.collectorError));
       if (data.ports && data.ports.rows.some((r) => r.firewallOff)) {
         box.prepend(el('div', 'notice bad', 'Windows Firewall is turned off for the active network profile. Every listening port is reachable.'));
       }

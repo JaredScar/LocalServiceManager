@@ -2,10 +2,10 @@
 
 A small web dashboard for a Windows server. Node.js only, no npm packages.
 
-- **Services:** status, CPU, memory, uptime, start/stop/restart, and a live log viewer.
-- **History:** server CPU and memory, plus CPU and memory per service, sampled every minute and kept for 24 hours.
-- **Sites:** each URL in the config, checked every minute, with status, response time, uptime and certificate expiry.
-- **Security:** which ports are reachable from the internet and why, plus a 24-hour attack summary (failed Windows/RDP logins, MariaDB login attempts, web scanners).
+- **Services:** status, CPU, memory, disk, uptime, pending Windows updates, start/stop/restart, and a live log viewer. A badge on the tab counts services that are stopped or not installed.
+- **History:** server CPU, memory and disk, plus CPU and memory per service, sampled every minute and kept for 24 hours.
+- **Sites:** each URL in the config, checked every minute, with status, response time, uptime and certificate expiry. A badge counts sites that are down or have a certificate inside 14 days.
+- **Security:** which ports are reachable from the internet and why, plus a 24-hour attack summary (failed Windows/RDP logins, MariaDB login attempts, web scanners). The page warns when the collector has stopped writing.
 
 ## Screenshots
 
@@ -13,9 +13,9 @@ These were taken with the built-in sample data (`SVCDASH_MOCK=1` and `SVCDASH_SE
 
 ### Services
 
-![Service cards with CPU, memory, disk, uptime, and start, stop, and restart buttons. Gitea is stopped. The Security tab shows a badge of 3.](docs/screenshots/services.png)
+![Service cards, with one stopped service badged on the tab, Windows update and reboot tiles, and start, stop, and restart buttons.](docs/screenshots/services.png)
 
-One card per service. The dashboard's own card is read-only ("Restart from Windows"). The red badge on **Security** is how many ports are open to the internet but not listed in `expectedPublicPorts`.
+One card per service. The tiles above the cards include pending Windows updates and whether a reboot is needed. The dashboard's own card is read-only ("Restart from Windows"). The red badge on **Services** counts services that are stopped or not installed. The badge on **Security** is how many ports are open to the internet but not listed in `expectedPublicPorts`. The badge on **Sites** counts sites that are down, or whose certificate expires within 14 days (amber when that is the only problem).
 
 ### Logs
 
@@ -31,7 +31,7 @@ Start, stop, and restart all ask first. Services that depend on the one you pick
 
 ### History
 
-![24-hour server CPU and memory charts, plus a small CPU and memory chart for each service. Gitea has a gap where it was down.](docs/screenshots/history.png)
+![24-hour server CPU, memory and disk charts, plus a small CPU and memory chart for each service. Gitea has a gap where it was down.](docs/screenshots/history.png)
 
 Hover a chart, or focus it and use the arrow keys. The attack chart on the Security page has the same controls, plus a table view.
 
@@ -45,7 +45,7 @@ Checked every minute from the server. **Check now** runs them immediately. The c
 
 ![Exposed ports grouped as unexpected, expected, restricted, and blocked, then a 24-hour chart of failed logins and tables of Windows, MariaDB, and web probes.](docs/screenshots/security.png)
 
-**Hide local-only** is on by default, so loopback listeners stay out of the way. Each unexpected address has **Copy block rule**. Logins from `trustedIps` are tagged "you" and left out of the attack counts. The warning at the top is there because the sample shows MariaDB reachable from outside.
+**Hide local-only** is on by default, so loopback listeners stay out of the way. Each unexpected address has **Copy block rule**. Logins from `trustedIps` are tagged "you" and left out of the attack counts. If the collector's file is more than 8 minutes old, a warning says the scheduled task may have stopped; the port and login figures below it are then the last copy, not a live reading. The MariaDB warning in the sample is there because that sample shows MariaDB reachable from outside.
 
 ## Files
 
@@ -67,6 +67,7 @@ Checked every minute from the server. **Check now** runs them immediately. The c
    - **`expectedPublicPorts`:** ports that are *meant* to be open to everyone. Anything else that's reachable is flagged as unexpected.
    - **`sites`:** URLs to check every minute.
    - **`attackSources`:** the MariaDB error log and the Caddy log folder.
+   - **`notify`:** optional. `url` is where to POST when something changes (a service stops or starts, a site goes down or comes back, a certificate crosses 14 or 7 days, an unexpected port appears or clears, or the collector goes quiet). `token` is sent as a bearer token when the receiver needs one. Leave `url` empty to stay silent. Discord, Slack, and ntfy URLs are recognized; anything else gets a JSON body with `message`, `text`, and `content`. The current state is saved first and is not sent, so restarting the dashboard does not repeat it.
 3. In an **elevated** PowerShell:
    ```powershell
    Get-ChildItem C:\apps\svcdash -Recurse | Unblock-File
@@ -85,7 +86,7 @@ The dashboard runs under its own low-privilege account, which can't read the Win
 - Only administrators can edit `collect.ps1`, so the dashboard can't change what runs as SYSTEM.
 - The collector reads nothing the dashboard writes.
 
-You'll see this task if you list non-Microsoft scheduled tasks. That's expected.
+You'll see this task if you list non-Microsoft scheduled tasks. That's expected. Each run also records whether Windows is waiting to reboot, and it searches for pending Windows updates at most once every 6 hours. Those show as tiles on the Services page. The update search gives up after 45 seconds so it cannot stall the rest of the collection.
 
 **Failed-logon auditing must be on** for failed RDP logins to appear. The page warns if it's off. To enable it:
 

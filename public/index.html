@@ -20,9 +20,9 @@
       <button id="refresh" type="button" class="btn">Refresh</button>
     </div>
     <nav class="nav" aria-label="Pages">
-      <a href="#/services" data-nav="services">Services</a>
+      <a href="#/services" data-nav="services">Services <span id="nav-services-badge" class="nav-badge" hidden></span></a>
       <a href="#/history" data-nav="history">History</a>
-      <a href="#/sites" data-nav="sites">Sites</a>
+      <a href="#/sites" data-nav="sites">Sites <span id="nav-sites-badge" class="nav-badge" hidden></span></a>
       <a href="#/security" data-nav="security">Security <span id="nav-security-badge" class="nav-badge" hidden></span></a>
     </nav>
   </header>
@@ -78,6 +78,10 @@
         <section class="panel">
           <h3>Server memory</h3>
           <div id="chart-mem"></div>
+        </section>
+        <section class="panel">
+          <h3>Disk</h3>
+          <div id="chart-disk"></div>
         </section>
       </div>
       <h3 class="section-title">Services</h3>

@@ -18,6 +18,7 @@ const el = (tag, cls, text) => {
 const state = {
   services: [],
   system: null,
+  maintenance: null,
   selected: null, // service name
   fileId: null,
   lastLines: [],
@@ -145,6 +146,7 @@ async function loadServices() {
     const data = await api('/api/services');
     state.services = data.services;
     state.system = data.system;
+    state.maintenance = data.maintenance || null;
     if (!state.online) toast('Connection restored.', 'ok');
     state.online = true;
     renderBanner(data);
@@ -219,6 +221,25 @@ function renderSystem() {
   }
 
   box.append(statTile('Uptime', fmtDuration(sys.bootTime), sys.hostname || '', null, ''));
+
+  const m = state.maintenance;
+  if (m) {
+    const updates = m.updates;
+    if (updates) {
+      const count = typeof updates.count === 'number' ? updates.count : null;
+      const failed = count === null;
+      const titles = Array.isArray(updates.titles) ? updates.titles.filter(Boolean) : [];
+      const sub = failed ? updates.error || 'Could not check' : count ? titles[0] || 'pending' : 'None pending';
+      const tile = statTile('Updates', failed ? 'Unknown' : count ? String(count) : 'None', sub, null, failed || count ? 'warn' : '');
+      if (titles.length) tile.title = titles.join('\n');
+      box.append(tile);
+    }
+    if (typeof m.rebootPending === 'boolean') {
+      box.append(
+        statTile('Reboot', m.rebootPending ? 'Needed' : 'Not needed', m.rebootPending ? 'Finish installing updates' : 'No reboot pending', null, m.rebootPending ? 'warn' : '')
+      );
+    }
+  }
 }
 
 function serviceBusy(s) {
@@ -282,6 +303,17 @@ function renderServices() {
   if (other) parts.push(`${other} other`);
   $('summary').textContent = `${state.services.length} services · ${parts.join(' · ')}`;
   document.title = stopped ? `(${stopped} down) Service Dashboard` : 'Service Dashboard';
+  updateServicesBadge(state.services);
+}
+
+function updateServicesBadge(services) {
+  const badge = $('nav-services-badge');
+  if (!badge) return;
+  const down = services.filter((s) => s.state === 'Stopped' || s.state === 'Not installed');
+  badge.hidden = down.length === 0;
+  badge.classList.remove('warn');
+  badge.textContent = String(down.length);
+  badge.title = down.map((s) => `${s.label} is ${s.state.toLowerCase()}`).join(', ');
 }
 
 function renderActions(s, busy) {

@@ -143,6 +143,79 @@ try {
   }
 } catch { $errors.Add("Security log: $($_.Exception.Message)") }
 
+# ---------- maintenance ----------
+# Reboot state is a registry read. The Windows Update search is slow, so its
+# result is cached for 6 hours in updates.json and copied into each report.
+$maintenance = $null
+try {
+  $reboot = $false
+  if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $reboot = $true }
+  if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $reboot = $true }
+  if (-not $reboot) {
+    $pendingRename = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+    if ($pendingRename -and $pendingRename.PendingFileRenameOperations) { $reboot = $true }
+  }
+
+  New-Item -ItemType Directory $OutDir -Force | Out-Null
+  $cacheFile = Join-Path $OutDir 'updates.json'
+  $updates = $null
+  if (Test-Path $cacheFile) {
+    try {
+      $cached = Get-Content $cacheFile -Raw | ConvertFrom-Json
+      $checked = [datetimeoffset]::Parse([string]$cached.checkedAt)
+      if ((([datetimeoffset]::UtcNow) - $checked).TotalHours -lt 6) { $updates = $cached }
+    } catch { }
+  }
+
+  if (-not $updates) {
+    $updates = [pscustomobject]@{ count = $null; titles = @(); checkedAt = [datetimeoffset]::UtcNow.ToString('o'); error = $null }
+    $rs = $null
+    $ps = $null
+    try {
+      $rs = [runspacefactory]::CreateRunspace()
+      $rs.ApartmentState = 'STA'
+      $rs.Open()
+      $ps = [powershell]::Create()
+      $ps.Runspace = $rs
+      [void]$ps.AddScript({
+        $session = New-Object -ComObject Microsoft.Update.Session
+        $searcher = $session.CreateUpdateSearcher()
+        $found = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+        $titles = New-Object System.Collections.Generic.List[string]
+        foreach ($u in $found.Updates) {
+          if ($titles.Count -ge 8) { break }
+          [void]$titles.Add([string]$u.Title)
+        }
+        [pscustomobject]@{ count = [int]$found.Updates.Count; titles = @($titles) }
+      })
+      $handle = $ps.BeginInvoke()
+      if (-not $handle.AsyncWaitHandle.WaitOne(45000)) {
+        [void]$ps.Stop()
+        $updates.error = 'Update search took too long and was skipped. It will be tried again on a later run.'
+      } else {
+        $found = @($ps.EndInvoke($handle))
+        if ($ps.HadErrors -and $ps.Streams.Error.Count -gt 0) {
+          $updates.error = [string]$ps.Streams.Error[0].Exception.Message
+        } elseif ($found.Count -gt 0 -and $null -ne $found[0].count) {
+          $updates.count = [int]$found[0].count
+          $updates.titles = @($found[0].titles)
+        } else {
+          $updates.count = 0
+        }
+      }
+    } catch {
+      $updates.error = $_.Exception.Message
+    } finally {
+      if ($ps) { $ps.Dispose() }
+      if ($rs) { $rs.Close(); $rs.Dispose() }
+    }
+    $cacheJson = ConvertTo-Json -InputObject $updates -Depth 4 -Compress
+    [IO.File]::WriteAllText($cacheFile, $cacheJson, (New-Object System.Text.UTF8Encoding $false))
+  }
+
+  $maintenance = [pscustomobject]@{ rebootPending = [bool]$reboot; updates = $updates }
+} catch { $errors.Add("Maintenance: $($_.Exception.Message)") }
+
 # ---------- write atomically ----------
 $result = [pscustomobject]@{
   generatedAt = $now.ToUniversalTime().ToString('o')
@@ -150,6 +223,7 @@ $result = [pscustomobject]@{
   listeners   = $listeners
   firewall    = $firewall
   logons      = $logons
+  maintenance = $maintenance
   errors      = @($errors)
 }
 

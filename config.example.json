@@ -18,6 +18,11 @@
     "caddyLogs": "C:/apps/Caddy/logs"
   },
 
+  "notify": {
+    "url": "",
+    "token": ""
+  },
+
   "services": [
     { "name": "caddy",   "label": "Caddy",             "logs": ["C:/apps/Caddy/logs"],
       "confirmNote": "The dashboard is served through Caddy, so this page will disconnect for a few seconds." },

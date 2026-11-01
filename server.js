@@ -11,7 +11,8 @@ const { execFile } = require('child_process');
 const { readTailLines } = require('./lib/util');
 const { createHistory } = require('./lib/history');
 const { createSites } = require('./lib/sites');
-const { buildPorts, buildAttacks, loadCollected } = require('./lib/security');
+const { buildPorts, buildAttacks, loadCollected, collectorProblem } = require('./lib/security');
+const { createNotify, certBand } = require('./lib/notify');
 
 const CONFIG_PATH = process.env.SVCDASH_CONFIG || path.join(__dirname, 'config.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -61,6 +62,19 @@ function loadConfig() {
     }
   });
   const attack = raw.attackSources || {};
+  const notify = raw.notify && typeof raw.notify === 'object' ? raw.notify : {};
+  const notifyUrl = String(notify.url || '').trim();
+  if (notifyUrl) {
+    let notifyTarget;
+    try {
+      notifyTarget = new URL(notifyUrl);
+    } catch {
+      throw new Error('notify.url is not a valid URL');
+    }
+    if (notifyTarget.protocol !== 'https:' && notifyTarget.protocol !== 'http:') {
+      throw new Error('notify.url must start with https:// or http://');
+    }
+  }
 
   return {
     host: raw.host || '127.0.0.1',
@@ -72,6 +86,7 @@ function loadConfig() {
     sites,
     mariadbLog: attack.mariadbLog || null,
     caddyLogs: attack.caddyLogs || null,
+    notify: { url: notifyUrl, token: String(notify.token || '').trim() },
   };
 }
 
@@ -454,6 +469,64 @@ const history = createHistory({
 
 const sites = createSites({ sites: config.sites, file: path.join(STATE_DIR, 'sites.json'), log });
 
+let maintenanceCache = { at: 0, value: undefined };
+
+async function readCollected() {
+  if (MOCK && !fs.existsSync(COLLECTED_FILE)) return { data: require('./lib/mock-collected').mockCollected(), error: null };
+  return loadCollected(COLLECTED_FILE);
+}
+
+async function getMaintenance() {
+  if (maintenanceCache.value !== undefined && Date.now() - maintenanceCache.at < 60e3) return maintenanceCache.value;
+  let value = null;
+  try {
+    const r = await readCollected();
+    value = r.data && r.data.maintenance ? r.data.maintenance : null;
+  } catch {
+    value = null;
+  }
+  maintenanceCache = { at: Date.now(), value };
+  return value;
+}
+
+function alertSnapshot(status, siteList, security) {
+  const services = {};
+  for (const svc of config.services) {
+    const row = status.byName.get(svc.name.toLowerCase());
+    services[svc.name] = { label: svc.label, state: row ? row.state : 'Not installed' };
+  }
+  const sitesState = {};
+  for (const site of siteList) {
+    const up = site.last ? Boolean(site.last.up) : null;
+    let detail = null;
+    if (site.last && !site.last.up) detail = site.last.error || (site.last.code ? `HTTP ${site.last.code}` : null);
+    sitesState[site.name] = { up, band: certBand(site), detail };
+  }
+  const ports = security && security.ports
+    ? security.ports.rows.filter((r) => r.status === 'open-unexpected').map((r) => `${r.port}/${String(r.proto).toLowerCase()}`).sort()
+    : [];
+  const stale = Boolean(security && security.collectorError && security.collectorAt);
+  return {
+    services,
+    sites: sitesState,
+    ports,
+    collectorStale: !security || !security.collectorAt || stale,
+    collectorDetail: security && security.collectorError ? security.collectorError : null,
+  };
+}
+
+const notify = createNotify({
+  file: path.join(STATE_DIR, 'notify.json'),
+  url: config.notify.url,
+  token: config.notify.token,
+  log,
+  observe: async () => {
+    const status = await getStatus(false);
+    const security = await getSecurity();
+    return alertSnapshot(status, sites.summary(), security);
+  },
+});
+
 let securityCache = { at: 0, data: null, pending: null };
 
 async function getSecurity() {
@@ -596,10 +669,16 @@ function friendlyFsError(code) {
 async function handleServices(res) {
   let status = { byName: new Map(), system: null };
   let statusError = null;
+  let maintenance = null;
   try {
     status = await getStatus(false);
   } catch (e) {
     statusError = e.message;
+  }
+  try {
+    maintenance = await getMaintenance();
+  } catch {
+    maintenance = null;
   }
 
   const services = await Promise.all(
@@ -642,6 +721,7 @@ async function handleServices(res) {
     mock: MOCK,
     statusError,
     system: status.system,
+    maintenance,
     services,
   });
 }
@@ -723,11 +803,13 @@ server.listen(config.port, config.host, () => {
   log(`Service dashboard on http://${config.host}:${config.port}` + (MOCK ? ' (mock status data)' : ''));
   history.start().catch((e) => log(`History failed to start: ${e.message}`));
   sites.start().catch((e) => log(`Site checks failed to start: ${e.message}`));
+  notify.start().catch((e) => log(`Notifications failed to start: ${e.message}`));
 });
 
 function shutdown() {
   history.stop();
   sites.stop();
+  notify.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();
 }
