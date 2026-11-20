@@ -666,6 +666,7 @@ const STATIC = {
   '/charts.js': ['charts.js', 'text/javascript; charset=utf-8'],
   '/pages.js': ['pages.js', 'text/javascript; charset=utf-8'],
   '/logo.png': ['logo.png', 'image/png'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
 };
 
 const SECURITY_HEADERS = {

@@ -1,6 +1,8 @@
 # Service Dashboard
 
-<img src="localServiceManager-logo.png" alt="" width="96">
+<p align="center">
+  <img src="localServiceManager-logo.png" alt="" width="96">
+</p>
 
 A small web dashboard for a Windows server. Node.js only, no npm packages.
 

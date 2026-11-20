@@ -1,6 +1,6 @@
 'use strict';
 
-// Writes a small green-on-navy icon. No dependencies.
+// Builds the web app logo and the installer icons from localServiceManager-logo.png.
 
 const fs = require('fs');
 const path = require('path');

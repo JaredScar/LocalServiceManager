@@ -1,0 +1,16 @@
+{
+  "name": "Service Dashboard",
+  "short_name": "Dashboard",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f13",
+  "theme_color": "#0d0f13"
+}

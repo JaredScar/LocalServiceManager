@@ -107,7 +107,7 @@ body {
   background: var(--panel);
 }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.brand .logo { width: 40px; height: 40px; flex: none; }
+.brand .logo { width: 64px; height: 64px; flex: none; }
 .top h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .top p { margin: 2px 0 0; }
 .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
