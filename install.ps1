@@ -2,6 +2,8 @@
 # Installs the service dashboard as a locked-down Windows service.
 # Safe to re-run: it recreates the service and re-applies permissions
 # (re-run it after adding services or log paths to config.json).
+# To install or update from a GitHub release, run setup.ps1 instead. It downloads
+# a complete copy into this folder, then runs this script.
 
 param(
   [string]$Dir  = "C:\apps\svcdash",

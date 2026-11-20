@@ -55,28 +55,34 @@ Checked every minute from the server. **Check now** runs them immediately. The c
 | `config.example.json` | Template for services, sites, trusted IPs, expected public ports, and log paths. Copy it to `config.json`. |
 | `public/` | The web page. |
 | `collect.ps1` | Collector that runs as SYSTEM every 2 minutes (see below). |
-| `install.ps1` | Installs or updates everything. |
+| `setup.ps1` | Downloads a GitHub release and installs or updates the server. |
+| `install.ps1` | Registers the service, permissions, and collector. `setup.ps1` runs this. |
 | `state/` | History and site-check data (created by the installer). |
 | `collected/` | Collector output (created by the installer). |
 
 ## Install or update
 
-1. Copy this folder to `C:\apps\svcdash`, overwriting the old files. Leave your existing `config.json` in place if you already have one.
-2. Otherwise copy `config.example.json` to `config.json`, then edit it (use forward slashes in paths):
-   - **`trustedIps`:** your home IP. Its logins and requests are labeled "you" and left out of the attack counts.
-   - **`expectedPublicPorts`:** ports that are *meant* to be open to everyone. Anything else that's reachable is flagged as unexpected.
-   - **`sites`:** URLs to check every minute.
-   - **`attackSources`:** the MariaDB error log and the Caddy log folder.
-   - **`notify`:** optional. `url` is where to POST when something changes (a service stops or starts, a site goes down or comes back, a certificate crosses 14 or 7 days, an unexpected port appears or clears, or the collector goes quiet). `token` is sent as a bearer token when the receiver needs one. Leave `url` empty to stay silent. Discord, Slack, and ntfy URLs are recognized; anything else gets a JSON body with `message`, `text`, and `content`. The current state is saved first and is not sent, so restarting the dashboard does not repeat it.
-3. In an **elevated** PowerShell:
-   ```powershell
-   Get-ChildItem C:\apps\svcdash -Recurse | Unblock-File
-   Set-ExecutionPolicy -Scope Process Bypass
-   C:\apps\svcdash\install.ps1
-   ```
-4. On the server, open http://127.0.0.1:3090.
+Releases are published on GitHub. The installer downloads a complete copy, so the server cannot end up missing a file. Run this in an **elevated** PowerShell. Node.js 18 or newer and [nssm](https://nssm.cc/) must already be installed, and nssm must be on PATH.
 
-Re-run `install.ps1` whenever you change `config.json`.
+```powershell
+$p = Join-Path $env:TEMP 'svcdash-setup.ps1'
+Invoke-WebRequest https://github.com/JaredScar/LocalServiceManager/releases/latest/download/setup.ps1 -OutFile $p
+Unblock-File $p
+Set-ExecutionPolicy -Scope Process Bypass
+& $p
+```
+
+Running it again updates `C:\apps\svcdash` and keeps `config.json`, `state\`, `collected\`, and `logs\`. The dashboard stops for a few seconds while the service is recreated.
+
+On a new server, the first run writes `config.json` from the example and stops. Edit that file (use forward slashes in paths), then run the installer again:
+
+- **`trustedIps`:** your home IP. Its logins and requests are labeled "you" and left out of the attack counts.
+- **`expectedPublicPorts`:** ports that are *meant* to be open to everyone. Anything else that's reachable is flagged as unexpected.
+- **`sites`:** URLs to check every minute.
+- **`attackSources`:** the MariaDB error log and the Caddy log folder.
+- **`notify`:** optional. `url` is where to POST when something changes (a service stops or starts, a site goes down or comes back, a certificate crosses 14 or 7 days, an unexpected port appears or clears, or the collector goes quiet). `token` is sent as a bearer token when the receiver needs one. Leave `url` empty to stay silent. Discord, Slack, and ntfy URLs are recognized; anything else gets a JSON body with `message`, `text`, and `content`. The current state is saved first and is not sent, so restarting the dashboard does not repeat it.
+
+Then open http://127.0.0.1:3090. After you only change `config.json`, re-run `C:\apps\svcdash\install.ps1`. Pin a release with `setup.ps1 -Version v1.0.0`.
 
 ## How the Security page gets its data
 
@@ -153,3 +159,5 @@ Keep it behind both the IP allowlist and the password; this dashboard can restar
 ## Publishing
 
 `config.json` is gitignored. It holds your domains, home IP, hostname, and log paths, so commit `config.example.json` instead. `state/`, `collected/`, and `logs/` are created on the server and are ignored too.
+
+Pushing a tag such as `v1.0.0` publishes a GitHub release. The release contains `setup.ps1` and `LocalServiceManager.zip`, which is the archive the installer downloads.

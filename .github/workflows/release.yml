@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack the app
+        run: git archive --format=zip --output=LocalServiceManager.zip HEAD
+
+      - name: Publish the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $ErrorActionPreference = 'Continue'
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            $notes = @'
+          Download setup.ps1 and run it from an elevated PowerShell:
+
+          ```powershell
+          $p = Join-Path $env:TEMP 'svcdash-setup.ps1'
+          Invoke-WebRequest https://github.com/JaredScar/LocalServiceManager/releases/latest/download/setup.ps1 -OutFile $p
+          Unblock-File $p
+          Set-ExecutionPolicy -Scope Process Bypass
+          & $p
+          ```
+
+          An existing config.json, state folder, collected folder, and logs are kept. Node.js 18 or newer and nssm must already be installed. On a new server, the first run writes config.json from the example and stops so you can edit it.
+          '@
+            gh release create $tag --title $tag --notes $notes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag LocalServiceManager.zip setup.ps1 --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
