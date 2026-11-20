@@ -9,33 +9,98 @@ const zlib = require('zlib');
 const outDir = path.join(__dirname, 'assets');
 fs.mkdirSync(outDir, { recursive: true });
 
-function rgba(size) {
-  const buf = Buffer.alloc(size * size * 4);
-  const c = size / 2;
-  const radius = size * 0.46;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4;
-      const dx = x + 0.5 - c;
-      const dy = y + 0.5 - c;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > radius) continue;
-      const edge = Math.min(1, radius - dist);
-      buf[i] = 23;
-      buf[i + 1] = 48;
-      buf[i + 2] = 66;
-      buf[i + 3] = Math.round(255 * edge);
-      // A short vertical mark, like a status pill.
-      const inMark = Math.abs(dx) < size * 0.09 && dy > -size * 0.22 && dy < size * 0.22;
-      if (inMark) {
-        buf[i] = 61;
-        buf[i + 1] = 196;
-        buf[i + 2] = 140;
-        buf[i + 3] = 255;
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+function decodePng(buf) {
+  let p = 8;
+  let width = 0;
+  let height = 0;
+  const idat = [];
+  while (p < buf.length) {
+    const len = buf.readUInt32BE(p);
+    p += 4;
+    const type = buf.toString('ascii', p, p + 4);
+    p += 4;
+    const data = buf.subarray(p, p + len);
+    p += len + 4;
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      if (data[8] !== 8 || data[9] !== 6 || data[12] !== 0) {
+        throw new Error('Logo PNG must be 8-bit RGBA and not interlaced');
       }
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') {
+      break;
     }
   }
-  return buf;
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * 4;
+  const out = Buffer.alloc(width * height * 4);
+  let prev = Buffer.alloc(stride);
+  let o = 0;
+  for (let y = 0; y < height; y++) {
+    const filter = raw[o++];
+    const row = Buffer.from(raw.subarray(o, o + stride));
+    o += stride;
+    for (let i = 0; i < stride; i++) {
+      const left = i >= 4 ? row[i - 4] : 0;
+      const up = prev[i];
+      const ul = i >= 4 ? prev[i - 4] : 0;
+      if (filter === 1) row[i] = (row[i] + left) & 255;
+      else if (filter === 2) row[i] = (row[i] + up) & 255;
+      else if (filter === 3) row[i] = (row[i] + ((left + up) >> 1)) & 255;
+      else if (filter === 4) row[i] = (row[i] + paeth(left, up, ul)) & 255;
+      else if (filter !== 0) throw new Error(`Unsupported PNG filter ${filter}`);
+    }
+    row.copy(out, y * stride);
+    prev = row;
+  }
+  return { width, height, pixels: out };
+}
+
+function fit(src, sw, sh, size) {
+  const out = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const y0 = Math.floor((y * sh) / size);
+    const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * sh) / size));
+    for (let x = 0; x < size; x++) {
+      const x0 = Math.floor((x * sw) / size);
+      const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * sw) / size));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (let yy = y0; yy < y1; yy++) {
+        for (let xx = x0; xx < x1; xx++) {
+          const i = (yy * sw + xx) * 4;
+          const al = src[i + 3];
+          r += src[i] * al;
+          g += src[i + 1] * al;
+          b += src[i + 2] * al;
+          a += al;
+          n++;
+        }
+      }
+      const o = (y * size + x) * 4;
+      if (a === 0) continue;
+      out[o] = Math.round(r / a);
+      out[o + 1] = Math.round(g / a);
+      out[o + 2] = Math.round(b / a);
+      out[o + 3] = Math.round(a / n);
+    }
+  }
+  return out;
 }
 
 function crc32(buf) {
@@ -130,10 +195,16 @@ function bmpDib(size, pixels) {
   return Buffer.concat([header, xor, and]);
 }
 
-const png256 = rgba(256);
-fs.writeFileSync(path.join(outDir, 'svcdash.png'), png(256, png256));
+const logoPath = path.join(__dirname, '..', 'localServiceManager-logo.png');
+const logo = decodePng(fs.readFileSync(logoPath));
+const sizes = [16, 32, 48, 256];
+const scaled = new Map(sizes.map((size) => [size, fit(logo.pixels, logo.width, logo.height, size)]));
+fs.writeFileSync(path.join(outDir, 'svcdash.png'), png(256, scaled.get(256)));
+fs.writeFileSync(path.join(__dirname, '..', 'public', 'logo.png'), png(256, scaled.get(256)));
 fs.writeFileSync(
   path.join(outDir, 'svcdash.ico'),
-  ico([16, 32, 48].map((size) => ({ size, pixels: rgba(size) })))
+  ico(sizes.map((size) => ({ size, pixels: scaled.get(size) })))
 );
-console.log('wrote installer/assets/svcdash.png and svcdash.ico');
+const corner = logo.pixels.subarray(0, 4);
+console.log(`logo ${logo.width}x${logo.height}, corner rgba ${[...corner].join(',')}`);
+console.log('wrote public/logo.png, installer/assets/svcdash.png, and installer/assets/svcdash.ico');

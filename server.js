@@ -665,6 +665,7 @@ const STATIC = {
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/charts.js': ['charts.js', 'text/javascript; charset=utf-8'],
   '/pages.js': ['pages.js', 'text/javascript; charset=utf-8'],
+  '/logo.png': ['logo.png', 'image/png'],
 };
 
 const SECURITY_HEADERS = {

@@ -22,14 +22,16 @@ ln -s /Applications "$STAGE/Applications"
 
 ICONSET="$STAGE/svcdash.iconset"
 mkdir -p "$ICONSET"
-sips -z 16 16 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_16x16.png" >/dev/null
-sips -z 32 32 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
-sips -z 32 32 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_32x32.png" >/dev/null
-sips -z 64 64 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_32x32@2x.png" >/dev/null
-sips -z 128 128 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_128x128.png" >/dev/null
-sips -z 256 256 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
-sips -z 256 256 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_256x256.png" >/dev/null
-sips -z 512 512 "$ROOT/installer/assets/svcdash.png" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+LOGO="$ROOT/localServiceManager-logo.png"
+sips -z 16 16 "$LOGO" --out "$ICONSET/icon_16x16.png" >/dev/null
+sips -z 32 32 "$LOGO" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
+sips -z 32 32 "$LOGO" --out "$ICONSET/icon_32x32.png" >/dev/null
+sips -z 64 64 "$LOGO" --out "$ICONSET/icon_32x32@2x.png" >/dev/null
+sips -z 128 128 "$LOGO" --out "$ICONSET/icon_128x128.png" >/dev/null
+sips -z 256 256 "$LOGO" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
+sips -z 256 256 "$LOGO" --out "$ICONSET/icon_256x256.png" >/dev/null
+sips -z 512 512 "$LOGO" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+sips -z 512 512 "$LOGO" --out "$ICONSET/icon_512x512.png" >/dev/null
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/svcdash.icns"
 rm -rf "$ICONSET"
 

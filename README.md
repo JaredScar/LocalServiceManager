@@ -1,5 +1,7 @@
 # Service Dashboard
 
+<img src="localServiceManager-logo.png" alt="" width="96">
+
 A small web dashboard for a Windows server. Node.js only, no npm packages.
 
 - **Services:** status, CPU, memory, disk, uptime, pending Windows updates, start/stop/restart, and a live log viewer. A badge on the tab counts services that are stopped or not installed.

@@ -17,6 +17,9 @@ jobs:
       - name: Pack the zip
         run: git archive --format=zip --output=LocalServiceManager.zip HEAD
 
+      - name: Build the icon from the logo
+        run: node installer/make-icon.js
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
