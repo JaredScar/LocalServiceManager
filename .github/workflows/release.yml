@@ -9,39 +9,67 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows-installer:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pack the app
+      - name: Pack the zip
         run: git archive --format=zip --output=LocalServiceManager.zip HEAD
 
-      - name: Publish the GitHub release
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build ServiceDashboard-Setup.exe
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $ErrorActionPreference = 'Continue'
-          $tag = "${{ github.ref_name }}"
-          gh release view $tag | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            $notes = @'
-          Download setup.ps1 and run it from an elevated PowerShell:
-
-          ```powershell
-          $p = Join-Path $env:TEMP 'svcdash-setup.ps1'
-          Invoke-WebRequest https://github.com/JaredScar/LocalServiceManager/releases/latest/download/setup.ps1 -OutFile $p
-          Unblock-File $p
-          Set-ExecutionPolicy -Scope Process Bypass
-          & $p
-          ```
-
-          An existing config.json, state folder, collected folder, and logs are kept. Node.js 18 or newer and nssm must already be installed. On a new server, the first run writes config.json from the example and stops so you can edit it.
-          '@
-            gh release create $tag --title $tag --notes $notes
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          gh release upload $tag LocalServiceManager.zip setup.ps1 --clobber
+          $ver = "${{ github.ref_name }}" -replace '^v', ''
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { throw "ISCC.exe was not installed" }
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          & $iscc "/DMyAppVersion=$ver" "installer\windows\svcdash.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist\ServiceDashboard-Setup.exe, LocalServiceManager.zip, setup.ps1 release-assets\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: release-assets/
+          if-no-files-found: error
+
+  macos-installer:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ServiceDashboard.dmg
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          bash installer/macos/build-dmg.sh "$ver"
+          mkdir -p release-assets
+          cp dist/ServiceDashboard.dmg release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    needs: [windows-installer, macos-installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash installer/publish-release.sh

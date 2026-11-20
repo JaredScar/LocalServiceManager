@@ -56,25 +56,20 @@ Checked every minute from the server. **Check now** runs them immediately. The c
 | `public/` | The web page. |
 | `collect.ps1` | Collector that runs as SYSTEM every 2 minutes (see below). |
 | `setup.ps1` | Downloads a GitHub release and installs or updates the server. |
-| `install.ps1` | Registers the service, permissions, and collector. `setup.ps1` runs this. |
+| `install.ps1` | Registers the service, permissions, and collector. The Windows setup program runs this. |
+| `installer/` | Builds `ServiceDashboard-Setup.exe` and `ServiceDashboard.dmg`. |
 | `state/` | History and site-check data (created by the installer). |
 | `collected/` | Collector output (created by the installer). |
 
 ## Install or update
 
-Releases are published on GitHub. The installer downloads a complete copy, so the server cannot end up missing a file. Run this in an **elevated** PowerShell. Node.js 18 or newer and [nssm](https://nssm.cc/) must already be installed, and nssm must be on PATH.
+Download the installer from the [latest release](https://github.com/JaredScar/LocalServiceManager/releases/latest). Node.js 18 or newer is required on either system.
 
-```powershell
-$p = Join-Path $env:TEMP 'svcdash-setup.ps1'
-Invoke-WebRequest https://github.com/JaredScar/LocalServiceManager/releases/latest/download/setup.ps1 -OutFile $p
-Unblock-File $p
-Set-ExecutionPolicy -Scope Process Bypass
-& $p
-```
+### Windows
 
-Running it again updates `C:\apps\svcdash` and keeps `config.json`, `state\`, `collected\`, and `logs\`. The dashboard stops for a few seconds while the service is recreated.
+Run [ServiceDashboard-Setup.exe](https://github.com/JaredScar/LocalServiceManager/releases/latest/download/ServiceDashboard-Setup.exe). [nssm](https://nssm.cc/) must be on PATH. The setup program installs to `C:\apps\svcdash`, keeps an existing `config.json`, `state\`, `collected\`, and `logs\`, and registers the service. The dashboard stops for a few seconds while that happens.
 
-On a new server, the first run writes `config.json` from the example and stops. Edit that file (use forward slashes in paths), then run the installer again:
+On a new server, setup writes `config.json` from the example. Edit that file (use forward slashes in paths), then run `C:\apps\svcdash\install.ps1`:
 
 - **`trustedIps`:** your home IP. Its logins and requests are labeled "you" and left out of the attack counts.
 - **`expectedPublicPorts`:** ports that are *meant* to be open to everyone. Anything else that's reachable is flagged as unexpected.
@@ -82,7 +77,17 @@ On a new server, the first run writes `config.json` from the example and stops. 
 - **`attackSources`:** the MariaDB error log and the Caddy log folder.
 - **`notify`:** optional. `url` is where to POST when something changes (a service stops or starts, a site goes down or comes back, a certificate crosses 14 or 7 days, an unexpected port appears or clears, or the collector goes quiet). `token` is sent as a bearer token when the receiver needs one. Leave `url` empty to stay silent. Discord, Slack, and ntfy URLs are recognized; anything else gets a JSON body with `message`, `text`, and `content`. The current state is saved first and is not sent, so restarting the dashboard does not repeat it.
 
-Then open http://127.0.0.1:3090. After you only change `config.json`, re-run `C:\apps\svcdash\install.ps1`. Pin a release with `setup.ps1 -Version v1.0.0`.
+Then open http://127.0.0.1:3090. After you only change `config.json`, re-run `C:\apps\svcdash\install.ps1`.
+
+Running the setup program again updates the installation. Windows SmartScreen may warn the first time, because the program is not signed. Choose More info, then Run anyway.
+
+The same release also includes `setup.ps1` if you would rather install from PowerShell.
+
+### Mac
+
+Open [ServiceDashboard.dmg](https://github.com/JaredScar/LocalServiceManager/releases/latest/download/ServiceDashboard.dmg) and drag Service Dashboard to Applications.
+
+The first time macOS blocks it, right-click the app, choose Open, and confirm. On a Mac the service list and the security page use sample data, because controlling Windows services and reading the Windows firewall happen on the server. Site checks from the Mac are real. Settings and history are stored in `~/Library/Application Support/Service Dashboard`.
 
 ## How the Security page gets its data
 
@@ -160,4 +165,4 @@ Keep it behind both the IP allowlist and the password; this dashboard can restar
 
 `config.json` is gitignored. It holds your domains, home IP, hostname, and log paths, so commit `config.example.json` instead. `state/`, `collected/`, and `logs/` are created on the server and are ignored too.
 
-Pushing a tag such as `v1.0.0` publishes a GitHub release. The release contains `setup.ps1` and `LocalServiceManager.zip`, which is the archive the installer downloads.
+Pushing a tag such as `v1.0.1` publishes a GitHub release. The release contains `ServiceDashboard-Setup.exe`, `ServiceDashboard.dmg`, `setup.ps1`, and `LocalServiceManager.zip`.

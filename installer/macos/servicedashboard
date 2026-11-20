@@ -1,0 +1,60 @@
+#!/bin/bash
+# Launches the dashboard with Node.js and opens it in the browser.
+# Service control and the security collector are Windows-only, so on a Mac the
+# service and security pages use the built-in sample data. Site checks are real.
+
+set -u
+
+APP="$(cd "$(dirname "$0")/../Resources/app" && pwd)"
+SUPPORT="$HOME/Library/Application Support/Service Dashboard"
+CONFIG="$SUPPORT/config.json"
+
+NODE=""
+for candidate in /opt/homebrew/bin/node /usr/local/bin/node; do
+  if [ -x "$candidate" ]; then
+    NODE="$candidate"
+    break
+  fi
+done
+if [ -z "$NODE" ] && command -v node >/dev/null 2>&1; then
+  NODE="$(command -v node)"
+fi
+if [ -z "$NODE" ]; then
+  osascript -e 'display alert "Node.js is required" message "Install Node.js 18 or newer, then open Service Dashboard again." as critical'
+  exit 1
+fi
+
+mkdir -p "$SUPPORT/state" "$SUPPORT/logs" "$SUPPORT/collected"
+if [ ! -f "$CONFIG" ]; then
+  cp "$APP/config.example.json" "$CONFIG"
+fi
+
+PORT="$("$NODE" -e 'const c=require(process.argv[1]); process.stdout.write(String(c.port||3090))' "$CONFIG")"
+HOST="$("$NODE" -e 'const c=require(process.argv[1]); process.stdout.write(String(c.host||"127.0.0.1"))' "$CONFIG")"
+
+export SVCDASH_CONFIG="$CONFIG"
+export SVCDASH_STATE="$SUPPORT/state"
+export SVCDASH_AUDIT="$SUPPORT/logs/audit.log"
+export SVCDASH_COLLECTED="$SUPPORT/collected/security.json"
+
+cd "$APP"
+"$NODE" server.js &
+PID=$!
+trap 'kill "$PID" 2>/dev/null || true' EXIT INT TERM
+
+URL="http://${HOST}:${PORT}/"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+  if curl -sf -o /dev/null "${URL}healthz"; then
+    open "$URL"
+    wait "$PID"
+    exit $?
+  fi
+  if ! kill -0 "$PID" 2>/dev/null; then
+    wait "$PID"
+    exit $?
+  fi
+  sleep 0.2
+done
+
+open "$URL"
+wait "$PID"
