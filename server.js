@@ -31,6 +31,7 @@ const MAX_FILES_PER_DIR = 15;
 const STATUS_CACHE_MS = 3000;
 const ACTION_TIMEOUT_MS = 120000;
 const LOG_EXTENSIONS = new Set(['.log', '.err', '.txt', '.out']);
+const LOG_ID_RE = /^[a-z0-9]{1,12}$/;
 const ACTIONS = new Set(['start', 'stop', 'restart']);
 const NAME_RE = /^[A-Za-z0-9_.-]+$/;
 
@@ -570,6 +571,31 @@ async function getSecurity() {
 
 // ---------- logs ----------
 
+// Stable id for a path. List order follows mtime, so an index would point at a
+// different file whenever another log is written.
+function logFileId(filePath) {
+  const s = path.resolve(String(filePath)).toLowerCase();
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function assignLogIds(files) {
+  const used = new Set();
+  for (const f of files) {
+    const base = logFileId(f.path);
+    let id = base;
+    let n = 2;
+    while (used.has(id)) id = `${base}${n++}`;
+    used.add(id);
+    f.id = id;
+  }
+  return files;
+}
+
 async function resolveLogs(service) {
   const files = [];
   const seen = new Set();
@@ -616,7 +642,7 @@ async function resolveLogs(service) {
       add({ path: p, name: path.basename(p), size: st.size, mtime: st.mtimeMs });
     }
   }
-  return files;
+  return assignLogIds(files);
 }
 
 async function tailFile(filePath, wanted) {
@@ -703,8 +729,8 @@ async function handleServices(res) {
         isSelf: s.isSelf,
         confirmNote: s.confirmNote,
         busy: action,
-        logs: logs.map((f, i) => ({
-          id: i,
+        logs: logs.map((f) => ({
+          id: f.id,
           name: f.name,
           path: f.path,
           size: f.size ?? null,
@@ -726,12 +752,12 @@ async function handleServices(res) {
   });
 }
 
-async function handleLog(res, serviceName, index, url) {
+async function handleLog(res, serviceName, fileId, url) {
   const service = serviceByName.get(String(serviceName).toLowerCase());
   if (!service) return sendJson(res, 404, { error: 'Unknown service' });
 
   const files = await resolveLogs(service);
-  const file = files[index];
+  const file = files.find((f) => f.id === fileId);
   if (!file) return sendJson(res, 404, { error: 'Unknown log file' });
   if (file.missing) return sendJson(res, 404, { error: friendlyFsError(file.error), path: file.path });
 
@@ -787,8 +813,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/sites') return sendJson(res, 200, { generatedAt: new Date().toISOString(), sites: sites.summary() });
     if (p === '/api/security') return sendJson(res, 200, { mock: MOCK, ...(await getSecurity()) });
 
-    const m = p.match(/^\/api\/logs\/([A-Za-z0-9_.-]+)\/(\d{1,3})$/);
-    if (m) return await handleLog(res, m[1], parseInt(m[2], 10), url);
+    const m = p.match(/^\/api\/logs\/([A-Za-z0-9_.-]+)\/([a-z0-9]{1,12})$/);
+    if (m && LOG_ID_RE.test(m[2])) return await handleLog(res, m[1], m[2], url);
 
     if (p === '/healthz') return send(res, 200, 'ok', 'text/plain; charset=utf-8');
 

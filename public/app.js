@@ -26,7 +26,7 @@ const state = {
   logTimer: null,
   svcTimer: null,
   fastUntil: 0,
-  loadingLog: false,
+  logGen: 0,
   pending: new Map(), // service name -> action started from this browser
   online: true,
 };
@@ -417,8 +417,9 @@ function selectService(name, fileId) {
   if (!svc) return;
 
   state.selected = name;
+  const chosen = fileId != null ? svc.logs.find((f) => f.id === fileId) : null;
   const firstOk = svc.logs.find((f) => !f.missing);
-  state.fileId = fileId !== undefined ? fileId : firstOk ? firstOk.id : svc.logs[0] ? svc.logs[0].id : null;
+  state.fileId = chosen ? chosen.id : firstOk ? firstOk.id : svc.logs[0] ? svc.logs[0].id : null;
 
   history.replaceState(null, '', `#/services/${encodeURIComponent(name)}/${state.fileId ?? ''}`);
   $('viewer').hidden = false;
@@ -463,36 +464,37 @@ function renderFileTabs() {
 
 async function loadLog(reset) {
   const logEl = $('log');
-  if (state.selected === null) return;
+  const service = state.selected;
+  const fileId = state.fileId;
+  const gen = ++state.logGen;
+  if (service === null) return;
 
-  if (state.fileId === null) {
+  if (fileId === null) {
     state.lastLines = [];
     logEl.replaceChildren(el('div', 'log-note', 'This service has no log files configured in config.json.'));
     $('v-meta').textContent = '';
     return;
   }
-  if (state.loadingLog) return;
-  state.loadingLog = true;
 
   if (reset) logEl.replaceChildren(el('div', 'log-note', 'Loading…'));
 
   const lines = $('lines').value;
   try {
     const data = await api(
-      `/api/logs/${encodeURIComponent(state.selected)}/${state.fileId}?lines=${encodeURIComponent(lines)}`
+      `/api/logs/${encodeURIComponent(service)}/${encodeURIComponent(fileId)}?lines=${encodeURIComponent(lines)}`
     );
+    if (gen !== state.logGen) return;
     state.lastLines = data.lines;
     state.lastFileName = data.name;
     renderLog(reset);
     const note = data.truncated ? ` · showing last ${data.lines.length}` : '';
     $('v-meta').textContent = `${data.name} · ${fmtBytes(data.size)}${note} · ${new Date().toLocaleTimeString()}`;
   } catch (e) {
+    if (gen !== state.logGen) return;
     state.lastLines = [];
     const msg = e.body && e.body.path ? `${e.message}\n${e.body.path}` : e.message;
     logEl.replaceChildren(el('div', 'log-note bad', msg));
     $('v-meta').textContent = '';
-  } finally {
-    state.loadingLog = false;
   }
 }
 
@@ -752,8 +754,7 @@ function parseHash() {
 
 function applyServicesRoute([name, file]) {
   if (!name || !state.services.some((s) => s.name === name)) return;
-  const id = file !== undefined && file !== '' ? Number(file) : undefined;
-  const fileId = Number.isInteger(id) ? id : undefined;
+  const fileId = file ? String(file) : undefined;
   if (name === state.selected && (fileId === undefined || fileId === state.fileId)) return;
   selectService(name, fileId);
 }
