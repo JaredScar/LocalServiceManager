@@ -418,6 +418,7 @@ dialog .note {
 
 .nav {
   flex-basis: 100%;
+  min-width: 0;
   display: flex;
   gap: 4px;
   margin: 4px 0 -16px;
@@ -461,6 +462,7 @@ dialog .note {
 }
 .page-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .page-head p { margin: 2px 0 0; }
+.page-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 .panel {
   padding: 14px;
@@ -562,10 +564,21 @@ dialog .note {
 .site-fact.warn strong { color: var(--warn); }
 .site-fact.bad strong { color: var(--bad); }
 .site-cert { margin: 10px 0 0; font-size: 13px; }
+.site-cert.ok { color: var(--ok); }
+.site-cert.warn { color: var(--warn); }
+.site-cert.bad { color: var(--bad); }
 .site-cert.ok span:last-child { color: var(--ok); }
 .site-cert.warn span:last-child { color: var(--warn); }
 .site-cert.bad span:last-child { color: var(--bad); }
+.patch-extra .site-cert { margin: 0; }
 .site-error { margin: 6px 0 0; font-size: 12px; color: var(--bad); font-family: var(--mono); word-break: break-word; }
+#page-patches .site-head { flex-wrap: wrap; }
+.site-facts.patch-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.site-facts.patch-facts strong { white-space: normal; overflow: visible; }
+.patch-extra { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.patch-extra p { margin: 0; }
+.patch-path { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+.line-label { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- security ---------- */
 

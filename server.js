@@ -13,6 +13,7 @@ const { createHistory } = require('./lib/history');
 const { createSites } = require('./lib/sites');
 const { buildPorts, buildAttacks, loadCollected, collectorProblem } = require('./lib/security');
 const { createNotify, certBand } = require('./lib/notify');
+const { createPatches, normalizePatchConfig } = require('./lib/patches');
 
 const CONFIG_PATH = process.env.SVCDASH_CONFIG || path.join(__dirname, 'config.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -88,6 +89,7 @@ function loadConfig() {
     mariadbLog: attack.mariadbLog || null,
     caddyLogs: attack.caddyLogs || null,
     notify: { url: notifyUrl, token: String(notify.token || '').trim() },
+    patches: normalizePatchConfig(raw.patches),
   };
 }
 
@@ -490,7 +492,7 @@ async function getMaintenance() {
   return value;
 }
 
-function alertSnapshot(status, siteList, security) {
+function alertSnapshot(status, siteList, security, patchState) {
   const services = {};
   for (const svc of config.services) {
     const row = status.byName.get(svc.name.toLowerCase());
@@ -507,14 +509,31 @@ function alertSnapshot(status, siteList, security) {
     ? security.ports.rows.filter((r) => r.status === 'open-unexpected').map((r) => `${r.port}/${String(r.proto).toLowerCase()}`).sort()
     : [];
   const stale = Boolean(security && security.collectorError && security.collectorAt);
-  return {
+  const snapshot = {
     services,
     sites: sitesState,
     ports,
     collectorStale: !security || !security.collectorAt || stale,
     collectorDetail: security && security.collectorError ? security.collectorError : null,
   };
+  if (patchState && Array.isArray(patchState.products)) {
+    const patchMap = {};
+    for (const p of patchState.products) {
+      if (!p || p.status === 'missing') continue;
+      patchMap[p.id] = { label: p.label, status: p.status, version: p.version || null, latest: p.latest || null };
+    }
+    snapshot.patches = patchMap;
+  }
+  return snapshot;
 }
+
+const patches = createPatches({
+  items: config.patches.items,
+  explicit: config.patches.explicit,
+  file: path.join(STATE_DIR, 'patches.json'),
+  mock: MOCK,
+  log,
+});
 
 const notify = createNotify({
   file: path.join(STATE_DIR, 'notify.json'),
@@ -524,7 +543,13 @@ const notify = createNotify({
   observe: async () => {
     const status = await getStatus(false);
     const security = await getSecurity();
-    return alertSnapshot(status, sites.summary(), security);
+    let patchState = null;
+    try {
+      patchState = await patches.summary(false);
+    } catch (e) {
+      log(`Patch check failed: ${e.message}`);
+    }
+    return alertSnapshot(status, sites.summary(), security, patchState);
   },
 });
 
@@ -804,6 +829,10 @@ const server = http.createServer(async (req, res) => {
         await sites.checkNow();
         return sendJson(res, 200, { generatedAt: new Date().toISOString(), sites: sites.summary() });
       }
+      if (p === '/api/patches/check') {
+        if (!isSameOriginRequest(req)) return sendJson(res, 403, { error: 'Request rejected (cross-site check failed).' });
+        return sendJson(res, 200, await patches.summary(true));
+      }
       return send(res, 404, 'Not found', 'text/plain; charset=utf-8');
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -814,6 +843,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/history') return sendJson(res, 200, { mock: MOCK, ...history.snapshot() });
     if (p === '/api/sites') return sendJson(res, 200, { generatedAt: new Date().toISOString(), sites: sites.summary() });
     if (p === '/api/security') return sendJson(res, 200, { mock: MOCK, ...(await getSecurity()) });
+    if (p === '/api/patches') return sendJson(res, 200, await patches.summary(false));
 
     const m = p.match(/^\/api\/logs\/([A-Za-z0-9_.-]+)\/([a-z0-9]{1,12})$/);
     if (m && LOG_ID_RE.test(m[2])) return await handleLog(res, m[1], m[2], url);
@@ -831,12 +861,14 @@ server.listen(config.port, config.host, () => {
   log(`Service dashboard on http://${config.host}:${config.port}` + (MOCK ? ' (mock status data)' : ''));
   history.start().catch((e) => log(`History failed to start: ${e.message}`));
   sites.start().catch((e) => log(`Site checks failed to start: ${e.message}`));
+  patches.start();
   notify.start().catch((e) => log(`Notifications failed to start: ${e.message}`));
 });
 
 function shutdown() {
   history.stop();
   sites.stop();
+  patches.stop();
   notify.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

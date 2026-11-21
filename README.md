@@ -10,6 +10,7 @@ A small web dashboard for a Windows server. Node.js only, no npm packages.
 - **History:** server CPU, memory and disk, plus CPU and memory per service, sampled every minute and kept for 24 hours.
 - **Sites:** each URL in the config, checked every minute, with status, response time, uptime and certificate expiry. A badge counts sites that are down or have a certificate inside 14 days.
 - **Security:** which ports are reachable from the internet and why, plus a 24-hour attack summary (failed Windows/RDP logins, MariaDB login attempts, web scanners). The page warns when the collector has stopped writing.
+- **Patches:** installed Node.js, PHP, and other common programs, compared with the latest patch in that release line. The badge counts lines that are behind or out of support. Node.js also shows how many security releases came out since the installed version.
 
 ## Screenshots
 
@@ -19,7 +20,7 @@ These were taken with the built-in sample data (`SVCDASH_MOCK=1` and `SVCDASH_SE
 
 ![Service cards, with one stopped service badged on the tab, Windows update and reboot tiles, and start, stop, and restart buttons.](docs/screenshots/services.png)
 
-One card per service. The tiles above the cards include pending Windows updates and whether a reboot is needed. The dashboard's own card is read-only ("Restart from Windows"). The red badge on **Services** counts services that are stopped or not installed. The badge on **Security** is how many ports are open to the internet but not listed in `expectedPublicPorts`. The badge on **Sites** counts sites that are down, or whose certificate expires within 14 days (amber when that is the only problem).
+One card per service. The tiles above the cards include pending Windows updates and whether a reboot is needed. The dashboard's own card is read-only ("Restart from Windows"). The red badge on **Services** counts services that are stopped or not installed. The badge on **Security** is how many ports are open to the internet but not listed in `expectedPublicPorts`. The badge on **Sites** counts sites that are down, or whose certificate expires within 14 days (amber when that is the only problem). The badge on **Patches** counts programs that are behind the latest patch in their release line, or out of support.
 
 ### Logs
 
@@ -44,6 +45,10 @@ Hover a chart, or focus it and use the arrow keys. The attack chart on the Secur
 ![Two site cards, Example and Example API, both up, with response time, 24-hour uptime, certificate expiry, and a small response-time chart.](docs/screenshots/sites.png)
 
 Checked every minute from the server. **Check now** runs them immediately. The certificate line turns amber within 14 days of expiry, and red within 7.
+
+### Patches
+
+One card per program. With the sample data, Node.js is behind and has security releases since the installed version, PHP is on a line that is out of support, MariaDB is a few patches behind, Caddy is current, and Gitea is no longer on one of its two newest lines. **Check now** runs the version commands and the release lookup again. **Hide not installed** is on by default.
 
 ### Security
 
@@ -79,7 +84,8 @@ On a new server, setup writes `config.json` from the example. Edit that file (us
 - **`expectedPublicPorts`:** ports that are *meant* to be open to everyone. Anything else that's reachable is flagged as unexpected.
 - **`sites`:** URLs to check every minute.
 - **`attackSources`:** the MariaDB error log and the Caddy log folder.
-- **`notify`:** optional. `url` is where to POST when something changes (a service stops or starts, a site goes down or comes back, a certificate crosses 14 or 7 days, an unexpected port appears or clears, or the collector goes quiet). `token` is sent as a bearer token when the receiver needs one. Leave `url` empty to stay silent. Discord, Slack, and ntfy URLs are recognized; anything else gets a JSON body with `message`, `text`, and `content`. The current state is saved first and is not sent, so restarting the dashboard does not repeat it.
+- **`notify`:** optional. `url` is where to POST when something changes (a service stops or starts, a site goes down or comes back, a certificate crosses 14 or 7 days, an unexpected port appears or clears, the collector goes quiet, or an installed program falls behind its latest patch, drops out of security support, or is current again). `token` is sent as a bearer token when the receiver needs one. Leave `url` empty to stay silent. Discord, Slack, and ntfy URLs are recognized; anything else gets a JSON body with `message`, `text`, and `content`. The current state is saved first and is not sent, so restarting the dashboard does not repeat it.
+- **`patches`:** optional. Leave it out and the page tracks whichever supported programs are installed. Set it to limit that list, or to point at an exe the search did not find. A listed program that is not there is shown as not installed, and is not counted on the badge. Known ids: `nodejs`, `php`, `mariadb`, `mysql`, `caddy`, `gitea`, `python`, `go`, `nginx`, `postgresql`, `redis`.
 
 Then open http://127.0.0.1:3090. After you only change `config.json`, re-run `C:\apps\svcdash\install.ps1`.
 
@@ -109,6 +115,14 @@ You'll see this task if you list non-Microsoft scheduled tasks. That's expected.
 auditpol /set /subcategory:"Logon" /success:enable /failure:enable
 wevtutil sl Security /ms:1073741824   # 1 GB Security log, so 24 hours fits
 ```
+
+## How the Patches page gets its data
+
+The dashboard looks up programs it knows how to identify: Node.js, PHP, MariaDB, MySQL, Caddy, Gitea, Python, Go, nginx, PostgreSQL, and Redis. For each one it finds, it runs that program's version command. The Node.js process the dashboard itself is running is read directly. Nothing is downloaded or installed, and the commands are not taken from config: config can only name a product and, if needed, the full path of its `.exe`.
+
+The version is compared with the current release line. Those lines come from [endoflife.date](https://endoflife.date), except Gitea, which is not in that feed. Gitea uses GitHub's stable releases, and the two newest minor versions count as supported. Node.js also counts releases that nodejs.org marks as security releases, newer than what is installed, in the same major version.
+
+Versions are cached for 10 minutes and release feeds for 6 hours. **Check now** refreshes both. "Up to date" means the latest patch in that release line is installed. It does not mean the program has no open issues. The same changes are included in notifications.
 
 ## Exposed ports: what the statuses mean
 

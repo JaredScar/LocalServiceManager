@@ -734,7 +734,7 @@ function wire() {
 }
 
 // ---------- pages & routing ----------
-// URLs: #/services[/name/fileId], #/history, #/sites, #/security (old #name/fileId still works)
+// URLs: #/services[/name/fileId], #/history, #/sites, #/patches, #/security (old #name/fileId still works)
 
 const pages = {};
 let currentPage = null;

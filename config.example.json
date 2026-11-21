@@ -23,6 +23,14 @@
     "token": ""
   },
 
+  "patches": [
+    { "id": "nodejs" },
+    { "id": "php", "exe": "C:/php/php.exe" },
+    { "id": "mariadb" },
+    { "id": "caddy", "exe": "C:/apps/Caddy/caddy.exe" },
+    { "id": "gitea", "exe": "C:/apps/gitea/gitea.exe" }
+  ],
+
   "services": [
     { "name": "caddy",   "label": "Caddy",             "logs": ["C:/apps/Caddy/logs"],
       "confirmNote": "The dashboard is served through Caddy, so this page will disconnect for a few seconds." },

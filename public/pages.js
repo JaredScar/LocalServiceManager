@@ -685,5 +685,233 @@
     });
   })();
 
+  // ================= Patches =================
+
+  (() => {
+    let timer = null;
+    let last = null;
+
+    const PATCH_PILL = {
+      current: ['Up to date', 'ok'],
+      behind: ['Patch available', 'bad'],
+      eol: ['Unsupported', 'bad'],
+      missing: ['Not installed', 'dim'],
+      error: ["Couldn't check", 'warn'],
+    };
+
+    function day(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+      if (!m) return null;
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
+    }
+
+    function daysUntil(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+      if (!m) return null;
+      const then = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      const now = new Date();
+      const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      return Math.round((then - today) / 86400000);
+    }
+
+    function notesLink(url) {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return null;
+      }
+      if (parsed.protocol !== 'https:') return null;
+      const a = el('a', 'site-url', 'Release notes');
+      a.href = parsed.href;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      return a;
+    }
+
+    function patchDetail(p) {
+      if (p.status === 'missing') return 'Not found. Set an exe path under patches in config.json if it is installed somewhere else.';
+      if (p.status === 'error') return p.error || 'Could not check this program.';
+      if (p.unmatched) return `${p.version} does not match a published release line. The newest release is ${p.latest}.`;
+      if (p.status === 'behind') return `${p.version} is behind ${p.latest}.`;
+      if (p.status === 'eol') {
+        const ended = p.supportUntil
+          ? `${p.supportLabel || 'Security support'} ended ${day(p.supportUntil)}.`
+          : `${p.lineLabel || 'This release'} is no longer a supported release.`;
+        if (p.latest && p.version && p.version !== p.latest) {
+          return `${p.version} is behind the last release in this line (${p.latest}). ${ended}`;
+        }
+        return ended;
+      }
+      const line = p.lineLabel ? ` in line ${p.lineLabel}` : '';
+      return `On ${p.version}, the latest patch${line}.`;
+    }
+
+    function detailLevel(p) {
+      if (p.status === 'behind' || p.status === 'eol') return 'bad';
+      if (p.status === 'error') return 'warn';
+      if (p.status === 'current') return 'ok';
+      return '';
+    }
+
+    function updateBadge(data) {
+      const badge = $('nav-patches-badge');
+      const list = data && data.products ? data.products : [];
+      const n = list.filter((p) => p.status === 'behind' || p.status === 'eol').length;
+      badge.hidden = n === 0;
+      badge.textContent = String(n);
+      badge.title = `${n} program${n === 1 ? '' : 's'} behind a patch or out of support`;
+    }
+
+    function render(data) {
+      last = data;
+      updateBadge(data);
+      const notes = $('patches-notes');
+      notes.replaceChildren();
+      if (data.error) notes.append(el('div', 'notice warn', data.error));
+      if ((data.products || []).some((p) => p.stale)) {
+        notes.append(el('div', 'notice warn', 'A release feed could not be refreshed. Cards marked stale are showing the last copy.'));
+      }
+
+      const counts = { current: 0, behind: 0, eol: 0, error: 0 };
+      for (const p of data.products || []) if (counts[p.status] != null) counts[p.status] += 1;
+      const sum = $('patches-summary');
+      sum.replaceChildren();
+      const chip = (count, text, cls) => count && sum.append(el('span', `chip ${cls}`, `${count} ${text}`));
+      chip(counts.behind, counts.behind === 1 ? 'patch available' : 'patches available', 'bad');
+      chip(counts.eol, 'unsupported', 'bad');
+      chip(counts.current, 'up to date', 'ok');
+      chip(counts.error, "couldn't check", 'warn');
+
+      const hideMissing = $('patches-hide-missing').checked;
+      const list = (data.products || []).filter((p) => !(hideMissing && p.status === 'missing'));
+      const box = $('patches-list');
+      box.replaceChildren();
+      if (!list.length) {
+        const empty = data.products && data.products.length
+          ? 'Nothing to show. Not-installed programs are hidden.'
+          : 'None of the tracked programs were found. Add a patches list to config.json to point at an exe, or install one of the programs this page knows.';
+        box.append(el('div', 'log-note', empty));
+      }
+
+      for (const p of list) {
+        const card = el('section', 'panel site');
+        const head = el('div', 'site-head');
+        const title = el('div');
+        title.append(el('h3', null, p.label));
+        const [pillText, pillCls] = PATCH_PILL[p.status] || [p.status, 'warn'];
+        head.append(title, pill(pillText, pillCls));
+        card.append(head);
+
+        const facts = el('div', 'site-facts patch-facts');
+        const fact = (label, value, node) => {
+          const f = el('div', 'site-fact');
+          f.append(el('span', 'muted small', label));
+          if (node) f.append(node);
+          else f.append(el('strong', null, value || '—'));
+          facts.append(f);
+        };
+        fact('Installed', p.version);
+        fact('Latest', p.latest);
+        const line = el('strong', 'line-label');
+        line.append(document.createTextNode(p.lineLabel || '—'));
+        if (p.lts && !/lts/i.test(p.lineLabel || '')) line.append(el('span', 'tag tag-ok', 'LTS'));
+        fact('Line', null, line);
+        fact('Released', p.latestDate ? day(p.latestDate) : null);
+        card.append(facts);
+
+        const detail = el('p', `site-cert ${detailLevel(p)}`);
+        detail.append(el('span', null, patchDetail(p)));
+        card.append(detail);
+
+        const extra = el('div', 'patch-extra');
+        const add = (text, cls) => extra.append(el('p', cls || 'muted small', text));
+        if (typeof p.securityReleases === 'number' && p.securityReleases > 0) {
+          add(
+            `${p.securityReleases} security release${p.securityReleases === 1 ? '' : 's'} since this version.`,
+            'site-cert bad'
+          );
+        }
+        if (p.supportUntil && !p.supportEnded && p.status !== 'eol') {
+          const days = daysUntil(p.supportUntil);
+          const when = day(p.supportUntil);
+          const label = p.supportLabel || 'Security support';
+          const ended = days != null && days < 0;
+          add(ended ? `${label} ended ${when}.` : `${label} until ${when}.`, days != null && days <= 60 ? 'site-cert warn' : 'muted small');
+        }
+        if (p.activeSupportEnded && !p.supportEnded) {
+          add(`${p.activeSupportLabel || 'Active support'} ended ${day(p.activeSupportEnded)}.`);
+        }
+        if (p.newerLine && p.newerLine.latest) add(`Newer line ${p.newerLine.label} (latest ${p.newerLine.latest}).`);
+        if (p.alsoRunning) add(`This dashboard is running ${p.alsoRunning}.`);
+        if (p.stale) add(`Release information is the last copy (${ago(Date.parse(p.feedAt))}).`, 'site-cert warn');
+        if (p.path) add(p.path, 'muted small patch-path');
+        const link = notesLink(p.notesUrl);
+        if (link) extra.append(link);
+        if (extra.childNodes.length) card.append(extra);
+        box.append(card);
+      }
+
+      const bits = [];
+      if (data.localAt) bits.push(`versions ${ago(Date.parse(data.localAt))}`);
+      if (data.feedsAt) bits.push(`release feeds ${ago(Date.parse(data.feedsAt))}`);
+      if (data.mock) bits.push('sample data');
+      $('patches-meta').textContent = bits.join(' · ');
+    }
+
+    async function load() {
+      try {
+        render(await api('/api/patches'));
+      } catch (e) {
+        pageError($('patches-list'), e);
+      }
+    }
+
+    $('patches-hide-missing').checked = prefs.get('hideUninstalled', true);
+    $('patches-hide-missing').addEventListener('change', () => {
+      prefs.set('hideUninstalled', $('patches-hide-missing').checked);
+      if (last) render(last);
+    });
+
+    $('patches-check').addEventListener('click', async () => {
+      const b = $('patches-check');
+      b.disabled = true;
+      b.textContent = 'Checking…';
+      try {
+        render(await postJson('/api/patches/check'));
+        toast('Patch check finished.', 'ok');
+      } catch (e) {
+        toast(`Check failed: ${e.message}`, 'bad');
+      } finally {
+        b.disabled = false;
+        b.textContent = 'Check now';
+      }
+    });
+
+    const badgeTick = async () => {
+      if (!document.hidden && !timer) {
+        try {
+          updateBadge(await api('/api/patches'));
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    setTimeout(badgeTick, 1500);
+    setInterval(badgeTick, 60e3);
+
+    SD.registerPage('patches', {
+      show() {
+        load();
+        timer = setInterval(() => !document.hidden && load(), 60e3);
+      },
+      hide() {
+        clearInterval(timer);
+        timer = null;
+      },
+      refresh: load,
+    });
+  })();
+
   SD.init();
 })();

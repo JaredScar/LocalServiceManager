@@ -29,6 +29,7 @@
       <a href="#/services" data-nav="services">Services <span id="nav-services-badge" class="nav-badge" hidden></span></a>
       <a href="#/history" data-nav="history">History</a>
       <a href="#/sites" data-nav="sites">Sites <span id="nav-sites-badge" class="nav-badge" hidden></span></a>
+      <a href="#/patches" data-nav="patches">Patches <span id="nav-patches-badge" class="nav-badge" hidden></span></a>
       <a href="#/security" data-nav="security">Security <span id="nav-security-badge" class="nav-badge" hidden></span></a>
     </nav>
   </header>
@@ -104,6 +105,24 @@
         <button id="sites-check" type="button" class="btn">Check now</button>
       </div>
       <div id="sites-list" class="site-grid"></div>
+    </div>
+
+    <!-- Patches -->
+    <div id="page-patches" data-page="patches" hidden>
+      <div class="page-head">
+        <div>
+          <h2>Patches</h2>
+          <p class="muted small">Latest patch in the same release line for Node.js, PHP, and the other programs found here. Up to date means that patch is installed. Node.js also counts security releases published since the version you have.</p>
+          <p id="patches-meta" class="muted small"></p>
+        </div>
+        <div class="page-actions">
+          <label class="check"><input id="patches-hide-missing" type="checkbox" checked> Hide not installed</label>
+          <button id="patches-check" type="button" class="btn">Check now</button>
+        </div>
+      </div>
+      <div id="patches-notes"></div>
+      <div id="patches-summary" class="chips"></div>
+      <div id="patches-list" class="site-grid"></div>
     </div>
 
     <!-- Security -->
