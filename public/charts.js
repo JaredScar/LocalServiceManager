@@ -102,21 +102,37 @@ const Charts = (() => {
         }
       }
 
-      // lines (broken at nulls and at time gaps)
+      // lines (broken at nulls and at time gaps), with an optional fill down to zero
       for (const se of series) {
-        let d = '';
-        let prevT = null;
+        const segs = [];
+        let cur = [];
         se.values.forEach((v, i) => {
           const t = times[i];
-          if (typeof v !== 'number' || t < from) {
-            prevT = null;
+          if (typeof v !== 'number' || t < from || (opts.to && t > to)) {
+            if (cur.length) segs.push(cur);
+            cur = [];
             return;
           }
-          const cmd = prevT === null || t - prevT > gapMs ? 'M' : 'L';
-          d += `${cmd}${x(t).toFixed(1)},${y(v).toFixed(1)}`;
-          prevT = t;
+          if (cur.length && t - cur[cur.length - 1].t > gapMs) {
+            segs.push(cur);
+            cur = [];
+          }
+          cur.push({ t, v });
         });
-        if (d) s('path', { d, class: 'series-line', stroke: se.color, fill: 'none' }, svg);
+        if (cur.length) segs.push(cur);
+
+        for (const seg of segs) {
+          let d = '';
+          for (const p of seg) d += `${d ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
+          if (opts.area && seg.length > 1) {
+            const fill =
+              `M${x(seg[0].t).toFixed(1)},${y(0).toFixed(1)}` +
+              seg.map((p) => `L${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('') +
+              `L${x(seg[seg.length - 1].t).toFixed(1)},${y(0).toFixed(1)}Z`;
+            s('path', { d: fill, class: 'series-area', fill: se.color, stroke: 'none' }, svg);
+          }
+          if (d) s('path', { d, class: 'series-line', stroke: se.color, fill: 'none' }, svg);
+        }
 
         // Points with no neighbour on either side would be invisible as a line; draw them as dots.
         se.values.forEach((v, i) => {

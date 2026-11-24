@@ -1,11 +1,9 @@
-// Applies the saved theme before the page paints, so there's no flash.
+// The dashboard is the light layout shown in the product screens.
 (function () {
-  var mode = 'dark';
+  document.documentElement.setAttribute('data-theme', 'light');
   try {
-    var saved = localStorage.getItem('svcdash.theme');
-    if (saved === 'dark' || saved === 'light' || saved === 'auto') mode = saved;
+    localStorage.removeItem('svcdash.theme');
   } catch (e) {
     /* storage unavailable */
   }
-  document.documentElement.setAttribute('data-theme', mode);
 })();

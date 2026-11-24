@@ -1,106 +1,213 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Service Dashboard</title>
+  <title>svcdash</title>
   <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
   <link rel="icon" href="/logo.png" type="image/png" sizes="256x256">
   <link rel="apple-touch-icon" href="/logo.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <meta name="theme-color" content="#0d0f13">
+  <meta name="theme-color" content="#f6f7f9">
 </head>
 <body>
   <header class="top">
-    <div class="brand">
-      <img class="logo" src="/logo.png" alt="" width="64" height="64">
-      <div>
-        <h1>Service Dashboard</h1>
-        <p id="summary" class="muted">Loading…</p>
-      </div>
-    </div>
-    <div class="top-actions">
-      <span id="updated" class="muted small"></span>
-      <button id="theme" type="button" class="btn" aria-label="Change theme">Theme: Dark</button>
-      <button id="refresh" type="button" class="btn">Refresh</button>
-    </div>
+    <a class="brand" href="#/overview">
+      <img class="logo" src="/logo.png" alt="" width="28" height="28">
+      <span>svcdash</span>
+    </a>
     <nav class="nav" aria-label="Pages">
+      <a href="#/overview" data-nav="overview">Overview</a>
       <a href="#/services" data-nav="services">Services <span id="nav-services-badge" class="nav-badge" hidden></span></a>
       <a href="#/history" data-nav="history">History</a>
       <a href="#/sites" data-nav="sites">Sites <span id="nav-sites-badge" class="nav-badge" hidden></span></a>
       <a href="#/patches" data-nav="patches">Patches <span id="nav-patches-badge" class="nav-badge" hidden></span></a>
       <a href="#/security" data-nav="security">Security <span id="nav-security-badge" class="nav-badge" hidden></span></a>
     </nav>
+    <div class="top-actions">
+      <span class="host-status">
+        <span id="host-dot" class="dot ok"></span>
+        <span id="hostname">…</span>
+        <span class="dot-sep">·</span>
+        <span id="updated">updated …</span>
+      </span>
+      <button id="refresh" type="button" class="btn">Refresh</button>
+    </div>
   </header>
 
   <div id="banner" class="banner" hidden></div>
 
   <main>
+    <!-- Overview -->
+    <div id="page-overview" data-page="overview">
+      <div class="page-intro">
+        <p id="overview-when" class="eyebrow">Overview</p>
+        <h2 id="overview-headline">Loading…</h2>
+        <p id="overview-sub" class="lede"></p>
+      </div>
+      <div class="overview-top">
+        <section class="card map-card">
+          <div class="card-top">
+            <div>
+              <h3>How traffic reaches your server</h3>
+              <p class="muted small">From Windows Firewall rules. Red paths should not be open.</p>
+            </div>
+            <div class="key">
+              <span><i class="swatch ok"></i> expected</span>
+              <span><i class="swatch bad"></i> unexpected</span>
+              <span><i class="swatch you"></i> only you</span>
+            </div>
+          </div>
+          <div id="traffic-map"></div>
+        </section>
+        <aside class="rail">
+          <p class="eyebrow">Needs you</p>
+          <div id="needs-you" class="stack"></div>
+          <p class="eyebrow rail-label">Worth a look</p>
+          <div id="worth" class="stack"></div>
+        </aside>
+      </div>
+      <div class="overview-bottom">
+        <section class="card">
+          <div class="card-top">
+            <div>
+              <h3>What happened in the last 24 hours</h3>
+              <p id="timeline-sub" class="muted small"></p>
+            </div>
+            <a class="text-link" href="#/history">Full history</a>
+          </div>
+          <div id="timeline"></div>
+        </section>
+        <div class="stack">
+          <section class="card" id="overview-server"></section>
+          <section class="card" id="overview-sites"></section>
+        </div>
+      </div>
+    </div>
+
     <!-- Services -->
-    <div id="page-services" data-page="services">
-      <section id="system" class="stats" aria-label="Server resources" hidden></section>
-
-      <section id="services" class="grid" aria-label="Services"></section>
-
-      <section id="viewer" class="viewer" hidden aria-label="Log viewer">
-        <div class="viewer-head">
-          <h2 id="v-title"></h2>
-          <div id="v-files" class="tabs" role="tablist"></div>
-        </div>
-
-        <div class="toolbar">
-          <input id="filter" type="search" placeholder="Filter lines…  ( / )" autocomplete="off" spellcheck="false">
-          <select id="lines" aria-label="Lines to show">
-            <option value="200">200 lines</option>
-            <option value="500" selected>500 lines</option>
-            <option value="1000">1000 lines</option>
-            <option value="2000">2000 lines</option>
-          </select>
-          <label class="check"><input id="errorsOnly" type="checkbox"> Errors &amp; warnings</label>
-          <label class="check"><input id="auto" type="checkbox" checked> Auto-refresh</label>
-          <label class="check"><input id="follow" type="checkbox" checked> Follow</label>
-          <label class="check"><input id="raw" type="checkbox"> Raw</label>
-          <button id="download" type="button" class="btn btn-sm">Download</button>
-          <span id="v-meta" class="muted small"></span>
-        </div>
-
-        <div id="log" class="log" role="log" aria-live="off"></div>
-      </section>
-
-      <p id="empty-hint" class="muted hint">Select a service to view its logs.</p>
+    <div id="page-services" data-page="services" hidden>
+      <div class="page-intro">
+        <p class="eyebrow">Services</p>
+        <h2 id="services-headline">Services</h2>
+        <p class="lede">Pick a service to see what it’s doing and read its logs.</p>
+      </div>
+      <div class="svc-layout">
+        <aside class="card svc-list-card">
+          <input id="svc-search" type="search" placeholder="Search services" autocomplete="off" spellcheck="false">
+          <div id="svc-filters" class="seg" role="group" aria-label="Filter services"></div>
+          <div id="services" class="svc-list" aria-label="Services"></div>
+        </aside>
+        <section id="viewer" class="card svc-detail" hidden aria-label="Service">
+          <div class="detail-top">
+            <div>
+              <div class="detail-title">
+                <h2 id="v-title"></h2>
+                <span id="v-state"></span>
+              </div>
+              <p id="v-meta-line" class="muted"></p>
+              <p id="v-sentence"></p>
+            </div>
+            <div id="detail-actions" class="detail-actions"></div>
+          </div>
+          <div id="v-stats" class="mini-stats"></div>
+          <div class="log-head">
+            <h3>Logs</h3>
+            <div id="v-files" class="tabs" role="tablist"></div>
+          </div>
+          <div class="log-tools">
+            <input id="filter" type="search" placeholder="Filter lines" autocomplete="off" spellcheck="false">
+            <div class="seg" role="group" aria-label="Which lines">
+              <button id="log-all" type="button">All</button>
+              <button id="log-problems" type="button">Problems <span id="problem-count"></span></button>
+            </div>
+            <label class="check"><input id="follow" type="checkbox" checked> Follow</label>
+            <label class="check"><input id="raw" type="checkbox"> Raw</label>
+            <label class="check"><input id="auto" type="checkbox" checked> Auto</label>
+            <select id="lines" aria-label="Lines to show">
+              <option value="200">200</option>
+              <option value="500" selected>500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+            <button id="download" type="button" class="btn btn-sm">Download</button>
+          </div>
+          <div id="log" class="log" role="log" aria-live="off"></div>
+          <div class="log-foot">
+            <span id="v-shown" class="muted small"></span>
+            <span id="v-meta" class="muted small"></span>
+          </div>
+        </section>
+      </div>
     </div>
 
     <!-- History -->
     <div id="page-history" data-page="history" hidden>
-      <div class="page-head">
-        <h2>Last 24 hours</h2>
-        <p id="history-meta" class="muted small"></p>
+      <div class="page-intro row">
+        <div>
+          <p class="eyebrow">History</p>
+          <h2 id="history-headline">Last 24 hours</h2>
+          <p id="history-meta" class="lede">Server and per-service usage, sampled every minute.</p>
+        </div>
+        <div id="history-range" class="seg" role="group" aria-label="Time range">
+          <button type="button" data-range="1">Last hour</button>
+          <button type="button" data-range="6">6 hours</button>
+          <button type="button" data-range="24">24 hours</button>
+        </div>
       </div>
-      <div class="chart-grid">
-        <section class="panel">
-          <h3>Server CPU</h3>
+      <section class="card chart-card">
+        <div class="card-top">
+          <div>
+            <h3>Server CPU</h3>
+            <p id="cpu-sub" class="muted small"></p>
+          </div>
+          <div id="cpu-metrics" class="metrics"></div>
+        </div>
+        <div class="chart-wrap">
           <div id="chart-cpu"></div>
-        </section>
-        <section class="panel">
-          <h3>Server memory</h3>
+          <div id="cpu-callout" class="callout" hidden></div>
+        </div>
+        <div id="cpu-pins" class="pins"></div>
+      </section>
+      <div class="split-2">
+        <section class="card">
+          <div class="card-top">
+            <div>
+              <h3>Memory</h3>
+              <p id="mem-sub" class="muted small"></p>
+            </div>
+            <div id="mem-metrics" class="metrics"></div>
+          </div>
           <div id="chart-mem"></div>
         </section>
-        <section class="panel">
-          <h3>Disk</h3>
+        <section class="card">
+          <div class="card-top">
+            <div>
+              <h3 id="disk-title">Disk</h3>
+              <p id="disk-sub" class="muted small"></p>
+            </div>
+            <div id="disk-metrics" class="metrics"></div>
+          </div>
           <div id="chart-disk"></div>
         </section>
       </div>
-      <h3 class="section-title">Services</h3>
-      <div id="history-services" class="multiples"></div>
+      <section class="card">
+        <div class="card-top">
+          <h3>By service</h3>
+          <span id="history-window-label" class="muted small">Last 24 hours</span>
+        </div>
+        <div id="history-services"></div>
+      </section>
     </div>
 
     <!-- Sites -->
     <div id="page-sites" data-page="sites" hidden>
-      <div class="page-head">
+      <div class="page-intro row">
         <div>
-          <h2>Sites &amp; certificates</h2>
-          <p id="sites-meta" class="muted small">Checked every minute from this server.</p>
+          <p class="eyebrow">Sites</p>
+          <h2 id="sites-headline">Sites</h2>
+          <p id="sites-meta" class="lede">Checked every minute from this server.</p>
         </div>
         <button id="sites-check" type="button" class="btn">Check now</button>
       </div>
@@ -109,10 +216,11 @@
 
     <!-- Patches -->
     <div id="page-patches" data-page="patches" hidden>
-      <div class="page-head">
+      <div class="page-intro row">
         <div>
-          <h2>Patches</h2>
-          <p class="muted small">Latest patch in the same release line for Node.js, PHP, and the other programs found here. Up to date means that patch is installed. Node.js also counts security releases published since the version you have.</p>
+          <p class="eyebrow">Patches</p>
+          <h2>Latest patch in the same release line</h2>
+          <p class="lede">Up to date means that patch is installed. Node.js also counts security releases published since the version you have.</p>
           <p id="patches-meta" class="muted small"></p>
         </div>
         <div class="page-actions">
@@ -127,50 +235,48 @@
 
     <!-- Security -->
     <div id="page-security" data-page="security" hidden>
-      <div class="page-head">
+      <div class="page-intro row">
         <div>
-          <h2>Security</h2>
-          <p id="security-meta" class="muted small"></p>
+          <p class="eyebrow">Security</p>
+          <h2 id="security-headline">Security</h2>
+          <p id="security-meta" class="lede"></p>
         </div>
+        <button id="security-refresh" type="button" class="btn">Refresh</button>
       </div>
       <div id="security-notes"></div>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h3>Exposed ports</h3>
-          <label class="check"><input id="ports-hide-local" type="checkbox" checked> Hide local-only</label>
+      <div id="security-actions" class="action-grid"></div>
+      <div id="attack-stats" class="stat-row"></div>
+      <section class="card">
+        <div class="card-top">
+          <h3>Attempts per hour</h3>
+          <div id="attack-legend" class="legend"></div>
         </div>
-        <p class="muted small">Estimated from Windows Firewall rules. Your hosting provider's network firewall, if any, isn't visible from here.</p>
-        <div id="ports-summary" class="chips"></div>
-        <div class="table-wrap"><table id="ports-table" class="table"></table></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h3>Attack summary · last 24 hours</h3>
-        </div>
-        <div id="attack-stats" class="stats"></div>
-        <div class="panel-head sub">
-          <h4>Failed attempts per hour</h4>
-          <label class="check"><input id="attack-table-toggle" type="checkbox"> Show as table</label>
-        </div>
-        <div id="attack-legend" class="legend"></div>
         <div id="attack-chart"></div>
-        <div id="attack-hourly-table" class="table-wrap" hidden></div>
-
-        <div class="split">
+      </section>
+      <section class="card">
+        <div class="card-top">
           <div>
-            <h4>Windows / RDP failed logins</h4>
-            <div id="table-windows" class="table-wrap"></div>
-          </div>
-          <div>
-            <h4>MariaDB login attempts</h4>
-            <div id="table-mariadb" class="table-wrap"></div>
+            <h3>Who’s knocking</h3>
+            <p class="muted small">Failed Windows logins, MariaDB, and the web, grouped by address.</p>
           </div>
         </div>
-        <h4>Web probes (4xx and scanner paths)</h4>
-        <div id="table-web" class="table-wrap"></div>
-        <h4>Successful remote logins</h4>
+        <div id="knock-table" class="table-wrap"></div>
+      </section>
+      <section class="card">
+        <div class="card-top">
+          <div>
+            <h3>Open ports</h3>
+            <p id="ports-note" class="muted small">From Windows Firewall rules. A firewall at your hosting provider isn’t visible from here.</p>
+          </div>
+        </div>
+        <div id="port-filters" class="seg" role="group" aria-label="Filter ports"></div>
+        <div id="ports-table" class="table-wrap"></div>
+      </section>
+      <section class="card">
+        <div class="card-top">
+          <h3>Successful sign-ins</h3>
+          <p id="success-note" class="muted small"></p>
+        </div>
         <div id="table-success" class="table-wrap"></div>
       </section>
     </div>
@@ -181,10 +287,10 @@
       <h3 id="confirm-title"></h3>
       <p id="confirm-body"></p>
       <div id="confirm-deps" hidden>
-        <p class="small muted">These depend on it and will also be <span id="confirm-deps-verb"></span>:</p>
+        <p id="confirm-deps-kicker" class="confirm-kicker">This also stops</p>
         <ul id="confirm-deps-list"></ul>
       </div>
-      <p id="confirm-note" class="note" hidden></p>
+      <p id="confirm-note" class="confirm-note" hidden></p>
       <div class="dialog-actions">
         <button value="cancel" class="btn" type="submit">Cancel</button>
         <button id="confirm-ok" value="ok" class="btn btn-danger" type="submit"></button>

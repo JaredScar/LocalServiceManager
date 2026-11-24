@@ -51,26 +51,6 @@ const prefs = {
   },
 };
 
-// ---------- theme ----------
-
-const THEMES = ['dark', 'light', 'auto'];
-const THEME_LABEL = { dark: 'Dark', light: 'Light', auto: 'Auto' };
-
-function currentTheme() {
-  const t = document.documentElement.getAttribute('data-theme');
-  return THEMES.includes(t) ? t : 'dark';
-}
-
-function setTheme(mode) {
-  document.documentElement.setAttribute('data-theme', mode);
-  try {
-    localStorage.setItem('svcdash.theme', mode);
-  } catch {
-    /* storage unavailable */
-  }
-  $('theme').textContent = `Theme: ${THEME_LABEL[mode]}`;
-}
-
 // ---------- formatting ----------
 
 function fmtDuration(iso) {
@@ -139,6 +119,38 @@ function postAction(name, action, force) {
   return postJson(`/api/services/${encodeURIComponent(name)}/${action}`, { force });
 }
 
+function numText(v) {
+  const n = Math.round(Number(v) * 10) / 10;
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+let usageHistory = null;
+let usageLoading = null;
+function loadUsage() {
+  if (usageHistory) return Promise.resolve(usageHistory);
+  if (!usageLoading) {
+    usageLoading = api('/api/history')
+      .then((d) => {
+        usageHistory = d;
+        return d;
+      })
+      .catch(() => null);
+  }
+  return usageLoading;
+}
+
+function seriesPeakAt(values) {
+  let peak = null;
+  let at = -1;
+  (values || []).forEach((v, i) => {
+    if (typeof v === 'number' && (peak === null || v > peak)) {
+      peak = v;
+      at = i;
+    }
+  });
+  return { peak, at };
+}
+
 // ---------- services ----------
 
 async function loadServices() {
@@ -152,18 +164,34 @@ async function loadServices() {
     renderBanner(data);
     renderSystem();
     renderServices();
-    $('updated').textContent = 'Updated ' + new Date(data.generatedAt).toLocaleTimeString();
+    $('updated').textContent = 'updated ' + new Date(data.generatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     if (state.selected) renderFileTabs();
+    notifyServices();
   } catch (e) {
     if (state.online) showBanner(`Lost connection to the dashboard (${e.message}). Retrying…`);
     state.online = false;
   }
 }
 
+const serviceListeners = new Set();
+
+function notifyServices() {
+  for (const fn of serviceListeners) {
+    try {
+      fn();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}
+
 function renderBanner(data) {
   if (data.statusError) showBanner(`Service status unavailable: ${data.statusError}`);
-  else if (data.mock) showBanner('Mock mode: status and actions are simulated (not running on Windows).');
   else hideBanner();
+  const dot = $('host-dot');
+  if (dot) dot.className = 'dot ' + (data.statusError ? 'bad' : 'ok');
+  const host = $('hostname');
+  if (host) host.textContent = (data.system && data.system.hostname) || (data.mock ? 'sample' : 'this server');
 }
 
 function showBanner(text) {
@@ -195,8 +223,8 @@ const levelFor = (pct, warn, bad) => (pct >= bad ? 'bad' : pct >= warn ? 'warn' 
 function renderSystem() {
   const sys = state.system;
   const box = $('system');
-  if (!sys) {
-    box.hidden = true;
+  if (!box || !sys) {
+    if (box) box.hidden = true;
     return;
   }
   box.hidden = false;
@@ -242,68 +270,180 @@ function renderSystem() {
   }
 }
 
+let svcQuery = '';
+let svcFilter = 'all';
+
 function serviceBusy(s) {
   return state.pending.get(s.name) || s.busy || null;
 }
 
+function renderSvcFilters(running, stopped) {
+  const box = $('svc-filters');
+  if (!box) return;
+  box.replaceChildren();
+  const choices = [
+    ['all', `All ${state.services.length}`],
+    ['running', `Running ${running}`],
+    ['stopped', `Stopped ${stopped}`],
+  ];
+  for (const [id, label] of choices) {
+    const b = el('button', svcFilter === id ? 'on' : '', label);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(svcFilter === id));
+    b.addEventListener('click', () => {
+      svcFilter = id;
+      renderServices();
+    });
+    box.append(b);
+  }
+}
+
+function serviceSentence(s) {
+  if (s.state === 'Stopped') {
+    const how = s.startMode === 'Auto'
+      ? 'It is set to start automatically, but it has not come back on its own.'
+      : 'It stays stopped until you start it.';
+    return `${s.label} is stopped. ${how}`;
+  }
+  if (s.state !== 'Running') return `${s.label} is ${String(s.state).toLowerCase()}.`;
+  const bits = [];
+  if (s.cpuPercent !== null && s.cpuPercent !== undefined) bits.push(`CPU is ${s.cpuPercent}%`);
+  if (s.memoryMB !== null) bits.push(`memory is ${s.memoryMB} MB`);
+  if (s.startedAt) bits.push(`up ${fmtDuration(s.startedAt)}`);
+  return bits.length ? `${bits.join(', ')}.` : `${s.label} is running.`;
+}
+
+function renderDetail() {
+  const s = state.services.find((x) => x.name === state.selected);
+  const viewer = $('viewer');
+  if (!viewer) return;
+  if (!s) {
+    viewer.hidden = true;
+    return;
+  }
+  viewer.hidden = false;
+  $('v-title').textContent = s.label;
+  const busy = serviceBusy(s);
+  const badge = $('v-state');
+  badge.className = 'pill ' + (busy ? 'warn' : stateClass(s.state));
+  badge.textContent = busy ? ACTION_VERB[busy] || 'Working…' : s.state === 'Running' ? 'Running' : s.state;
+
+  const bits = [s.name];
+  if (s.process) bits.push(s.pid ? `${s.process} (${s.pid})` : s.process);
+  if (s.account) bits.push(s.account);
+  if (s.startMode === 'Auto') bits.push('starts automatically');
+  else if (s.startMode) bits.push(`start ${s.startMode}`);
+  $('v-meta-line').textContent = bits.join(' · ');
+  $('v-sentence').textContent = serviceSentence(s);
+
+  const stats = $('v-stats');
+  stats.replaceChildren();
+  const mini = (label, value, sub) => {
+    const t = el('div', 'mini');
+    t.append(el('span', null, label), el('strong', null, value));
+    if (sub) t.append(el('em', null, sub));
+    return t;
+  };
+  const running = s.state === 'Running';
+  stats.append(
+    mini('CPU', running && s.cpuPercent !== null && s.cpuPercent !== undefined ? `${numText(s.cpuPercent)}%` : '—', running ? 'right now' : ''),
+    mini('Memory', s.memoryMB !== null ? `${numText(s.memoryMB)} MB` : '—', ''),
+    mini('Uptime', running ? fmtDuration(s.startedAt) : '—', running && s.startedAt ? `since ${new Date(s.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''),
+    mini('Account', s.account ? s.account.replace(/\\/g, '\\\u200b') : '—', s.startMode === 'Auto' ? 'starts automatically' : s.startMode || '')
+  );
+  const selected = s.name;
+  loadUsage().then((d) => {
+    if (!d || state.selected !== selected) return;
+    const row = d.services && d.services[s.name];
+    if (!row) return;
+    const cpu = seriesPeakAt(row.cpu);
+    const mem = seriesPeakAt(row.mem);
+    const tiles = [...stats.children];
+    const setSub = (tile, text) => {
+      if (!tile) return;
+      let em = tile.querySelector('em');
+      if (!em) tile.append((em = el('em', null, '')));
+      em.textContent = text;
+    };
+    if (cpu.peak !== null) setSub(tiles[0], `peak ${numText(cpu.peak)}% today`);
+    if (mem.peak !== null) setSub(tiles[1], `peak ${numText(mem.peak)} MB today`);
+    if (running && cpu.peak !== null && cpu.peak >= 15 && d.times[cpu.at]) {
+      const when = new Date(d.times[cpu.at]).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      $('v-sentence').textContent = `Its busiest moment today was ${when}, when it hit ${numText(cpu.peak)}% CPU.`;
+    }
+  });
+
+  const actions = $('detail-actions');
+  actions.replaceChildren();
+  if (!s.controllable) {
+    actions.append(el('span', 'muted small', s.isSelf ? 'Restart from Windows' : s.installed ? 'Read-only' : 'Not installed'));
+    return;
+  }
+  const stoppedState = s.state === 'Stopped';
+  const mk = (action, enabled, cls) => {
+    const b = el('button', 'btn' + (cls ? ' ' + cls : ''), ACTION_TITLE[action]);
+    b.type = 'button';
+    b.disabled = Boolean(busy) || !enabled;
+    b.addEventListener('click', () => runAction(s.name, action));
+    return b;
+  };
+  if (stoppedState) actions.append(mk('start', true, 'btn-primary'));
+  else if (running) actions.append(mk('restart', true), mk('stop', true));
+  else actions.append(mk('start', false), mk('restart', false), mk('stop', false));
+}
+
 function renderServices() {
-  const grid = $('services');
-  grid.replaceChildren();
+  const list = $('services');
+  if (!list) return;
+  list.replaceChildren();
 
   let running = 0;
   let stopped = 0;
-  let other = 0;
-
   for (const s of state.services) {
     if (s.state === 'Running') running++;
     else if (s.state === 'Stopped') stopped++;
-    else other++;
-
-    const busy = serviceBusy(s);
-    const card = el('div', 'card' + (s.name === state.selected ? ' selected' : ''));
-
-    const select = el('button', 'card-select', s.label);
-    select.type = 'button';
-    select.setAttribute('aria-pressed', String(s.name === state.selected));
-    select.title = `Show ${s.label} logs`;
-    select.addEventListener('click', () => selectService(s.name));
-
-    const pill = busy
-      ? el('span', 'pill warn busy', ACTION_VERB[busy] || 'Working…')
-      : el('span', 'pill ' + stateClass(s.state), s.state);
-
-    const head = el('div', 'card-head');
-    head.append(select, pill);
-
-    const facts = el('dl', 'facts');
-    const add = (k, v, cls) => {
-      const dd = el('dd', cls || null, v ?? '—');
-      dd.title = v ?? '';
-      facts.append(el('dt', null, k), dd);
-    };
-    const isRunning = s.state === 'Running';
-    add('Service', s.name);
-    add('Start', s.startMode);
-    add('Account', s.account);
-    add('Process', s.pid ? `${s.process || '?'} (${s.pid})` : '—');
-    add(
-      'CPU',
-      isRunning ? (s.cpuPercent === null ? '…' : `${s.cpuPercent}%`) : '—',
-      isRunning && s.cpuPercent >= 50 ? 'hot' : ''
-    );
-    add('Memory', s.memoryMB !== null ? `${s.memoryMB} MB` : '—');
-    add('Uptime', isRunning ? fmtDuration(s.startedAt) : '—');
-
-    card.append(head, facts, renderActions(s, busy));
-    grid.append(card);
   }
+  renderSvcFilters(running, stopped);
 
-  const parts = [`${running} running`];
-  if (stopped) parts.push(`${stopped} stopped`);
-  if (other) parts.push(`${other} other`);
-  $('summary').textContent = `${state.services.length} services · ${parts.join(' · ')}`;
-  document.title = stopped ? `(${stopped} down) Service Dashboard` : 'Service Dashboard';
+  const q = svcQuery.trim().toLowerCase();
+  const visible = state.services.filter((s) => {
+    if (q && !`${s.label} ${s.name}`.toLowerCase().includes(q)) return false;
+    if (svcFilter === 'running' && s.state !== 'Running') return false;
+    if (svcFilter === 'stopped' && s.state !== 'Stopped') return false;
+    return true;
+  });
+
+  for (const s of visible) {
+    const row = el('button', 'svc-row' + (s.name === state.selected ? ' on' : '') + (s.state === 'Stopped' ? ' down' : ''));
+    row.type = 'button';
+    const grow = el('span', 'grow');
+    const sub = [];
+    if (s.state === 'Running') {
+      if (s.cpuPercent !== null && s.cpuPercent !== undefined) sub.push(`${s.cpuPercent}%`);
+      if (s.memoryMB !== null) sub.push(`${s.memoryMB} MB`);
+      if (s.startedAt) sub.push(`up ${fmtDuration(s.startedAt)}`);
+    } else if (s.state === 'Stopped') sub.push('down');
+    else sub.push(s.state);
+    grow.append(el('strong', null, s.label), el('span', 'sub', sub.join(' · ')));
+    row.append(el('span', 'dot ' + (s.state === 'Running' ? 'ok' : s.state === 'Stopped' ? 'bad' : 'dim')), grow);
+    if (s.state === 'Stopped') row.append(el('span', 'pill bad', 'Stopped'));
+    else if (serviceBusy(s)) row.append(el('span', 'pill warn', 'Working'));
+    row.addEventListener('click', () => selectService(s.name));
+    list.append(row);
+  }
+  if (!visible.length) list.append(el('p', 'muted small', state.services.length ? 'No services match.' : 'No services configured.'));
+
+  const down = state.services.filter((s) => s.state === 'Stopped');
+  const headline = $('services-headline');
+  if (headline) {
+    if (!state.services.length) headline.textContent = 'No services configured.';
+    else if (down.length === 1) headline.textContent = `${running} of ${state.services.length} running. ${down[0].label} is down.`;
+    else if (down.length) headline.textContent = `${running} of ${state.services.length} running. ${down.length} are down.`;
+    else headline.textContent = `All ${state.services.length} services are running.`;
+  }
+  document.title = down.length ? `(${down.length}) svcdash` : 'svcdash';
   updateServicesBadge(state.services);
+  renderDetail();
 }
 
 function updateServicesBadge(services) {
@@ -316,27 +456,12 @@ function updateServicesBadge(services) {
   badge.title = down.map((s) => `${s.label} is ${s.state.toLowerCase()}`).join(', ');
 }
 
-function renderActions(s, busy) {
-  const bar = el('div', 'card-actions');
-  if (!s.controllable) {
-    const why = s.isSelf ? 'Restart from Windows' : s.installed ? 'Read-only' : 'Not installed';
-    bar.append(el('span', 'note-inline', why));
-    return bar;
-  }
-  const running = s.state === 'Running';
-  const stoppedState = s.state === 'Stopped';
-  const mk = (action, enabled) => {
-    const b = el('button', 'btn btn-sm', ACTION_TITLE[action]);
-    b.type = 'button';
-    b.disabled = Boolean(busy) || !enabled;
-    b.addEventListener('click', () => runAction(s.name, action));
-    return b;
-  };
-  bar.append(mk('start', stoppedState), mk('stop', running), mk('restart', running));
-  return bar;
-}
-
 // ---------- actions ----------
+
+function depLabel(name) {
+  const s = state.services.find((x) => x.name === name || x.name.toLowerCase() === String(name).toLowerCase());
+  return s ? s.label : name;
+}
 
 function confirmAction(svc, action, dependents) {
   return new Promise((resolve) => {
@@ -344,22 +469,30 @@ function confirmAction(svc, action, dependents) {
     $('confirm-title').textContent = `${ACTION_TITLE[action]} ${svc.label}?`;
     $('confirm-body').textContent =
       action === 'start'
-        ? `This starts the ${svc.name} service.`
+        ? `This starts ${svc.label}.`
         : action === 'stop'
-          ? `This stops the ${svc.name} service until you start it again.`
-          : `This stops and starts the ${svc.name} service.`;
+          ? 'It stays stopped until you start it again.'
+          : 'It stops and starts again. Open connections drop for a moment.';
 
     const showDeps = action !== 'start' && dependents.length > 0;
     $('confirm-deps').hidden = !showDeps;
-    $('confirm-deps-verb').textContent = action === 'stop' ? 'stopped' : 'restarted';
-    $('confirm-deps-list').replaceChildren(...dependents.map((d) => el('li', null, d)));
+    $('confirm-deps-kicker').textContent = action === 'stop' ? 'This also stops' : 'This also restarts';
+    $('confirm-deps-list').replaceChildren(
+      ...dependents.map((d) => {
+        const li = el('li');
+        li.append(el('strong', null, depLabel(d)), el('span', null, `because it needs ${svc.label}`));
+        return li;
+      })
+    );
 
     const note = action !== 'start' ? svc.confirmNote : null;
     $('confirm-note').hidden = !note;
     $('confirm-note').textContent = note || '';
 
+    const count = 1 + (showDeps ? dependents.length : 0);
     const ok = $('confirm-ok');
-    ok.textContent = ACTION_TITLE[action];
+    ok.textContent =
+      action === 'stop' && count > 1 ? `Stop ${count} services` : action === 'restart' && count > 1 ? `Restart ${count} services` : ACTION_TITLE[action];
     ok.className = 'btn ' + (action === 'start' ? 'btn-primary' : 'btn-danger');
 
     dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
@@ -422,10 +555,6 @@ function selectService(name, fileId) {
   state.fileId = chosen ? chosen.id : firstOk ? firstOk.id : svc.logs[0] ? svc.logs[0].id : null;
 
   history.replaceState(null, '', `#/services/${encodeURIComponent(name)}/${state.fileId ?? ''}`);
-  $('viewer').hidden = false;
-  $('empty-hint').hidden = true;
-  $('v-title').textContent = svc.label;
-
   renderServices();
   renderFileTabs();
   loadLog(true);
@@ -509,13 +638,19 @@ function detectLevel(text) {
   return '';
 }
 
+const SCAN_RE = /\.env|\.git|wp-(admin|login)|xmlrpc|phpmyadmin|\.\.\/|\/etc\/passwd/i;
+
 function parseLine(line, raw) {
   if (!raw && line.charAt(0) === '{') {
     try {
       const o = JSON.parse(line);
       let ts = '';
-      if (typeof o.ts === 'number') ts = new Date(o.ts * 1000).toLocaleString();
-      else if (typeof o.ts === 'string') ts = new Date(o.ts).toLocaleString();
+      const asTime = (value) => {
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString();
+      };
+      if (typeof o.ts === 'number') ts = asTime(o.ts * 1000);
+      else if (typeof o.ts === 'string') ts = asTime(o.ts) || o.ts;
 
       let level = String(o.level || '').toLowerCase();
       if (level === 'warning') level = 'warn';
@@ -532,6 +667,20 @@ function parseLine(line, raw) {
           .join('  ');
         if (status >= 500) level = 'error';
         else if (status >= 400) level = 'warn';
+        const target = (r.host || '') + (r.uri || '');
+        return {
+          ts,
+          level,
+          text,
+          access: {
+            status,
+            method: r.method || '',
+            target,
+            ip: r.client_ip || r.remote_ip || '',
+            dur,
+            scanner: SCAN_RE.test(target),
+          },
+        };
       } else if (o.action && o.service) {
         // Dashboard audit log
         const who = [o.user, o.ip].filter(Boolean).join(' @ ');
@@ -572,28 +721,60 @@ function appendHighlighted(container, text, needle) {
   }
 }
 
+function syncLogMode() {
+  const on = prefs.get('errorsOnly', false);
+  const all = $('log-all');
+  const problems = $('log-problems');
+  if (!all || !problems) return;
+  all.classList.toggle('on', !on);
+  problems.classList.toggle('on', on);
+  all.setAttribute('aria-pressed', String(!on));
+  problems.setAttribute('aria-pressed', String(on));
+}
+
+function codeClass(status) {
+  const n = Number(status);
+  if (n >= 500) return 'c5';
+  if (n >= 400) return 'c4';
+  if (n >= 200) return 'c2';
+  return '';
+}
+
 function renderLog(forceBottom) {
   const logEl = $('log');
   const raw = $('raw').checked;
   const needle = $('filter').value.trim().toLowerCase();
-  const errorsOnly = $('errorsOnly').checked;
+  const errorsOnly = prefs.get('errorsOnly', false);
+  syncLogMode();
 
   const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
   const prevTop = logEl.scrollTop;
 
   const frag = document.createDocumentFragment();
   let shown = 0;
+  let problems = 0;
 
   for (const line of state.lastLines) {
+    const parsed = parseLine(line, raw);
+    if (parsed.level === 'error' || parsed.level === 'warn') problems++;
     if (needle && !line.toLowerCase().includes(needle)) continue;
-    const p = parseLine(line, raw);
-    if (errorsOnly && p.level !== 'error' && p.level !== 'warn') continue;
+    if (errorsOnly && parsed.level !== 'error' && parsed.level !== 'warn') continue;
 
-    const row = el('div', 'line' + (p.level ? ' ' + p.level : ''));
-    row.append(el('span', 'ts', p.ts));
-    const msg = el('span', 'msg');
-    appendHighlighted(msg, p.text, needle);
-    row.append(msg);
+    const row = el('div', 'line' + (parsed.access ? ' access' : '') + (parsed.level ? ' ' + parsed.level : ''));
+    row.append(el('span', 'ts', parsed.ts));
+    if (parsed.access) {
+      row.append(el('span', 'code ' + codeClass(parsed.access.status), String(parsed.access.status)));
+      const msg = el('span', 'msg');
+      appendHighlighted(msg, `${parsed.access.method} ${parsed.access.target}`.trim(), needle);
+      if (parsed.access.scanner) msg.append(el('span', 'tag tag-warn', 'scanner'));
+      row.append(msg);
+      const meta = [parsed.access.ip, parsed.access.dur].filter(Boolean).join(' · ');
+      if (meta) row.append(el('span', 'meta', meta));
+    } else {
+      const msg = el('span', 'msg');
+      appendHighlighted(msg, parsed.text, needle);
+      row.append(msg);
+    }
     frag.append(row);
     shown++;
   }
@@ -604,6 +785,10 @@ function renderLog(forceBottom) {
   }
 
   logEl.replaceChildren(frag);
+  const count = $('problem-count');
+  if (count) count.textContent = problems ? String(problems) : '';
+  const shownEl = $('v-shown');
+  if (shownEl) shownEl.textContent = state.lastLines.length ? `${shown} of ${state.lastLines.length} lines` : '';
 
   if ($('follow').checked && (forceBottom || nearBottom)) logEl.scrollTop = logEl.scrollHeight;
   else logEl.scrollTop = prevTop;
@@ -653,8 +838,7 @@ function restorePrefs() {
   $('auto').checked = prefs.get('auto', true);
   $('follow').checked = prefs.get('follow', true);
   $('raw').checked = prefs.get('raw', false);
-  $('errorsOnly').checked = prefs.get('errorsOnly', false);
-  $('theme').textContent = `Theme: ${THEME_LABEL[currentTheme()]}`;
+  syncLogMode();
 }
 
 function wire() {
@@ -675,10 +859,18 @@ function wire() {
     }
   });
 
-  $('theme').addEventListener('click', () => {
-    const next = THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length];
-    setTheme(next);
+  $('svc-search').addEventListener('input', () => {
+    svcQuery = $('svc-search').value;
+    renderServices();
   });
+
+  const setProblems = (on) => {
+    prefs.set('errorsOnly', on);
+    syncLogMode();
+    renderLog(true);
+  };
+  $('log-all').addEventListener('click', () => setProblems(false));
+  $('log-problems').addEventListener('click', () => setProblems(true));
 
   let filterTimer;
   $('filter').addEventListener('input', () => {
@@ -706,12 +898,10 @@ function wire() {
     loadLog(true);
   });
 
-  for (const id of ['raw', 'errorsOnly']) {
-    $(id).addEventListener('change', () => {
-      prefs.set(id, $(id).checked);
-      renderLog(true);
-    });
-  }
+  $('raw').addEventListener('change', () => {
+    prefs.set('raw', $('raw').checked);
+    renderLog(true);
+  });
 
   $('follow').addEventListener('change', () => {
     prefs.set('follow', $('follow').checked);
@@ -734,7 +924,7 @@ function wire() {
 }
 
 // ---------- pages & routing ----------
-// URLs: #/services[/name/fileId], #/history, #/sites, #/patches, #/security (old #name/fileId still works)
+// URLs: #/overview, #/services[/name/fileId], #/history, #/sites, #/patches, #/security
 
 const pages = {};
 let currentPage = null;
@@ -745,11 +935,12 @@ function registerPage(name, impl) {
 
 function parseHash() {
   const h = decodeURIComponent(location.hash.slice(1));
+  if (!h || h === '/') return { page: 'overview', rest: [] };
   if (h.startsWith('/')) {
     const parts = h.slice(1).split('/');
-    return { page: parts[0] || 'services', rest: parts.slice(1) };
+    return { page: parts[0] || 'overview', rest: parts.slice(1) };
   }
-  return { page: 'services', rest: h ? h.split('/') : [] };
+  return { page: 'services', rest: h.split('/') };
 }
 
 function applyServicesRoute([name, file]) {
@@ -761,7 +952,7 @@ function applyServicesRoute([name, file]) {
 
 function route() {
   const { page, rest } = parseHash();
-  const name = page === 'services' || pages[page] ? page : 'services';
+  const name = page === 'services' || pages[page] ? page : 'overview';
   if (name !== currentPage) {
     if (currentPage && pages[currentPage] && pages[currentPage].hide) pages[currentPage].hide();
     document.querySelectorAll('[data-page]').forEach((p) => {
@@ -774,7 +965,13 @@ function route() {
     currentPage = name;
     if (pages[name] && pages[name].show) pages[name].show();
   }
-  if (name === 'services') applyServicesRoute(rest);
+  if (name === 'services') {
+    applyServicesRoute(rest);
+    if (!state.selected && state.services.length) {
+      const down = state.services.find((s) => s.state === 'Stopped') || state.services[0];
+      selectService(down.name);
+    }
+  }
 }
 
 async function init() {
@@ -800,7 +997,18 @@ window.SD = {
   fmtBytes,
   registerPage,
   init,
+  runAction,
+  onServices(fn) {
+    serviceListeners.add(fn);
+    return () => serviceListeners.delete(fn);
+  },
   get services() {
     return state.services;
+  },
+  get system() {
+    return state.system;
+  },
+  get maintenance() {
+    return state.maintenance;
   },
 };

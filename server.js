@@ -257,6 +257,33 @@ const mock = (() => {
   };
 })();
 
+function mockLogLines(service, fileName) {
+  const now = Date.now();
+  const name = String(fileName || '').toLowerCase();
+  const access = name.includes('access') || service.name.toLowerCase() === 'caddy';
+  const lines = [];
+  const paths = ['/', '/api/health', '/.env', '/api/health', '/', '/.env', '/wp-login.php', '/'];
+  const codes = [200, 200, 403, 200, 500, 404, 404, 200];
+  const ips = ['203.0.113.10', '203.0.113.10', '198.51.100.44', '203.0.113.10', '203.0.113.10', '192.0.2.21', '192.0.2.10', '203.0.113.10'];
+  for (let i = 18; i >= 1; i--) {
+    const t = new Date(now - i * 45000).toISOString();
+    if (access) {
+      const n = i % paths.length;
+      lines.push(JSON.stringify({
+        ts: t,
+        status: codes[n],
+        duration: 0.008 + (i % 5) * 0.006,
+        request: { method: 'GET', host: 'example.com', uri: paths[n], client_ip: ips[n] },
+      }));
+    } else if (service.name.toLowerCase() === 'mariadb') {
+      lines.push(`${t.slice(0, 19).replace('T', ' ')} ${100 + i} [Warning] Access denied for user 'admin'@'192.0.2.21' (using password: YES)`);
+    } else {
+      lines.push(`${t} info ${service.label} heartbeat ${i}`);
+    }
+  }
+  return lines;
+}
+
 // ----- live status with caching + CPU deltas -----
 
 let statusCache = { at: 0, data: null, pending: null };
@@ -786,6 +813,10 @@ async function handleLog(res, serviceName, fileId, url) {
   const files = await resolveLogs(service);
   const file = files.find((f) => f.id === fileId);
   if (!file) return sendJson(res, 404, { error: 'Unknown log file' });
+  if (file.missing && MOCK) {
+    const lines = mockLogLines(service, file.name);
+    return sendJson(res, 200, { name: file.name, path: file.path, mtime: Date.now(), size: lines.join('\n').length, totalLinesRead: lines.length, truncated: false, lines });
+  }
   if (file.missing) return sendJson(res, 404, { error: friendlyFsError(file.error), path: file.path });
 
   const requested = parseInt(url.searchParams.get('lines') || '500', 10);
