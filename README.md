@@ -14,47 +14,55 @@ A small web dashboard for a Windows server. Node.js only, no npm packages.
 
 ## Screenshots
 
-These were taken with the built-in sample data (`SVCDASH_MOCK=1` and `SVCDASH_SEED=1`), so the uptime tile says `MOCK-SERVER` and the addresses are documentation IPs. On a real server those are your machine, your sites, and your logs.
+These were taken with the built-in sample data (`SVCDASH_MOCK=1` and `SVCDASH_SEED=1`), so the header says `MOCK-SERVER` and the addresses are documentation IPs. On a real server those are your machine, your sites, and your logs.
+
+### Overview
+
+![The overview: four things that need attention, a map of how traffic reaches the server, the last 24 hours, and server and site meters.](docs/screenshots/overview.png)
+
+The first page. Stopped services, ports that should not be open, and sites that are down are listed under **Needs you**. The map marks paths as expected, exposed, or limited to your IP. Pending Windows updates show under **Worth a look**.
 
 ### Services
 
-![Service cards, with one stopped service badged on the tab, Windows update and reboot tiles, and start, stop, and restart buttons.](docs/screenshots/services.png)
+![The service list, with Gitea stopped and badged on the tab, and Caddy selected with its usage, actions, and log.](docs/screenshots/services.png)
 
-One card per service. The tiles above the cards include pending Windows updates and whether a reboot is needed. The dashboard's own card is read-only ("Restart from Windows"). The red badge on **Services** counts services that are stopped or not installed. The badge on **Security** is how many ports are open to the internet but not listed in `expectedPublicPorts`. The badge on **Sites** counts sites that are down, or whose certificate expires within 14 days (amber when that is the only problem). The badge on **Patches** counts programs that are behind the latest patch in their release line, or out of support.
+Select a service to see what it is doing. Start, stop, and restart are on that detail. The dashboard's own service is read-only. The badge on **Services** counts services that are stopped or not installed. The badge on **Security** is how many ports are open to the internet but not listed in `expectedPublicPorts`. The badge on **Sites** counts sites that are down, or whose certificate expires within 14 days (amber when that is the only problem). The badge on **Patches** counts programs that are behind the latest patch in their release line, or out of support.
 
 ### Logs
 
-![Caddy access log, with 404 and 500 lines highlighted, a filter box, and auto-refresh and follow enabled.](docs/screenshots/logs.png)
+![Caddy's access log, with 404 and 500 lines highlighted, scanner tags, a filter, and follow and auto-refresh on.](docs/screenshots/logs.png)
 
-Click a card to tail its logs. Caddy's JSON access lines are shown as status, method, URL, client, and duration. Errors and warnings are colored. Press `/` to filter. There is also an errors-only toggle, raw JSON, and download.
+Caddy's JSON access lines are shown as status, method, URL, client, and duration. Client errors and server errors are colored, and probes for sensitive paths get a scanner tag. **Problems** keeps only those lines. **Raw** shows the original text. Press `/` to filter. **Follow**, **Auto**, and **Download** sit on the same row.
 
 ### Confirming a stop
 
-![A dialog asking to stop MariaDB, listing my-api as a dependent that will also stop, with a note that apps will lose their database connection.](docs/screenshots/confirm.png)
+![A dialog asking to stop MariaDB, listing My API as a dependent that will also stop, with a note that apps will lose their database connection.](docs/screenshots/confirm.png)
 
 Start, stop, and restart all ask first. Services that depend on the one you picked, and are currently running, are listed and stopped or restarted with it.
 
 ### History
 
-![24-hour server CPU, memory and disk charts, plus a small CPU and memory chart for each service. Gitea has a gap where it was down.](docs/screenshots/history.png)
+![24-hour server CPU with one spike called out, memory and disk, and a CPU and memory chart for each service. Gitea has a gap where it was stopped.](docs/screenshots/history.png)
 
 Hover a chart, or focus it and use the arrow keys. The attack chart on the Security page has the same controls, plus a table view.
 
 ### Sites
 
-![Two site cards, Example and Example API, both up, with response time, 24-hour uptime, certificate expiry, and a small response-time chart.](docs/screenshots/sites.png)
+![Two site cards. Example is up, with response time, uptime, and a certificate. Example API is down.](docs/screenshots/sites.png)
 
-Checked every minute from the server. **Check now** runs them immediately. The certificate line turns amber within 14 days of expiry, and red within 7.
+Checked every minute from the server. **Check now** runs them immediately. The certificate line turns amber within 14 days of expiry, and red within 7. In this sample, `api.example.com` does not resolve, so Example API is down.
 
 ### Patches
+
+![Patch cards for Node.js, PHP, MariaDB, Caddy, and Gitea. Node.js and MariaDB have a patch available, PHP and Gitea are unsupported, and Caddy is up to date.](docs/screenshots/patches.png)
 
 One card per program. With the sample data, Node.js is behind and has security releases since the installed version, PHP is on a line that is out of support, MariaDB is a few patches behind, Caddy is current, and Gitea is no longer on one of its two newest lines. **Check now** runs the version commands and the release lookup again. **Hide not installed** is on by default.
 
 ### Security
 
-![Exposed ports grouped as unexpected, expected, restricted, and blocked, then a 24-hour chart of failed logins and tables of Windows, MariaDB, and web probes.](docs/screenshots/security.png)
+![The security page: close MariaDB first, copy block rules for the other unexpected ports, attack totals, the attempts chart, who's knocking, and the open-ports table.](docs/screenshots/security.png)
 
-**Hide local-only** is on by default, so loopback listeners stay out of the way. Each unexpected address has **Copy block rule**. Logins from `trustedIps` are tagged "you" and left out of the attack counts. If the collector's file is more than 8 minutes old, a warning says the scheduled task may have stopped; the port and login figures below it are then the last copy, not a live reading. The MariaDB warning in the sample is there because that sample shows MariaDB reachable from outside.
+Loopback listeners stay out of the ports table, and the note under the filters says how many were hidden. Each unexpected port has **Copy block rule**. Logins from `trustedIps` are tagged "you" and left out of the attack counts. If the collector's file is more than 8 minutes old, a warning says the scheduled task may have stopped; the port and login figures below it are then the last copy, not a live reading. The MariaDB and Caddy warnings in the sample are there because those log paths are not on the machine, and the page still shows MariaDB reachable from outside.
 
 ## Files
 
@@ -107,7 +115,7 @@ The dashboard runs under its own low-privilege account, which can't read the Win
 - Only administrators can edit `collect.ps1`, so the dashboard can't change what runs as SYSTEM.
 - The collector reads nothing the dashboard writes.
 
-You'll see this task if you list non-Microsoft scheduled tasks. That's expected. Each run also records whether Windows is waiting to reboot, and it searches for pending Windows updates at most once every 6 hours. Those show as tiles on the Services page. The update search gives up after 45 seconds so it cannot stall the rest of the collection.
+You'll see this task if you list non-Microsoft scheduled tasks. That's expected. Each run also records whether Windows is waiting to reboot, and it searches for pending Windows updates at most once every 6 hours. Pending updates and a waiting reboot show on the overview, under Worth a look. The update search gives up after 45 seconds so it cannot stall the rest of the collection.
 
 **Failed-logon auditing must be on** for failed RDP logins to appear. The page warns if it's off. To enable it:
 
@@ -140,7 +148,7 @@ A common surprise: the first time Node.js listens on a port, Windows may create 
 
 ## Controlling services
 
-Each service card has **Start**, **Stop** and **Restart**, all behind a confirmation. Dependent services (e.g. the APIs depend on MariaDB) are listed in the confirmation.
+The service you select has **Start**, **Stop**, and **Restart**, all behind a confirmation. Dependent services (e.g. the APIs depend on MariaDB) are listed in the confirmation.
 
 - `"control": false` on a service makes it read-only.
 - `"allowControl": false` makes the whole dashboard read-only.
@@ -177,7 +185,7 @@ Keep it behind both the IP allowlist and the password; this dashboard can restar
 ## Notes
 
 - History and site results are kept for 24 hours and survive restarts.
-- The header theme button cycles Dark, Light, and Auto.
+- The header theme button switches between Dark and Light. With nothing saved, the page follows the system theme.
 
 ## Publishing
 
