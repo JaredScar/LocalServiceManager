@@ -32,6 +32,10 @@
         <span class="dot-sep">·</span>
         <span id="updated">updated …</span>
       </span>
+      <button id="theme" type="button" class="btn" aria-pressed="false">
+        <span class="when-light">Dark</span>
+        <span class="when-dark">Light</span>
+      </button>
       <button id="refresh" type="button" class="btn">Refresh</button>
     </div>
   </header>
@@ -55,7 +59,7 @@
             </div>
             <div class="key">
               <span><i class="swatch ok"></i> expected</span>
-              <span><i class="swatch bad"></i> unexpected</span>
+              <span><i class="swatch bad"></i> exposed</span>
               <span><i class="swatch you"></i> only you</span>
             </div>
           </div>
@@ -88,14 +92,16 @@
 
     <!-- Services -->
     <div id="page-services" data-page="services" hidden>
-      <div class="page-intro">
-        <p class="eyebrow">Services</p>
-        <h2 id="services-headline">Services</h2>
-        <p class="lede">Pick a service to see what it’s doing and read its logs.</p>
+      <div class="page-intro row">
+        <div>
+          <p class="eyebrow">Services</p>
+          <h2 id="services-headline">Services</h2>
+          <p class="lede">Pick a service to see what it’s doing and read its logs.</p>
+        </div>
+        <input id="svc-search" class="page-search" type="search" placeholder="Search services" autocomplete="off" spellcheck="false">
       </div>
       <div class="svc-layout">
         <aside class="card svc-list-card">
-          <input id="svc-search" type="search" placeholder="Search services" autocomplete="off" spellcheck="false">
           <div id="svc-filters" class="seg" role="group" aria-label="Filter services"></div>
           <div id="services" class="svc-list" aria-label="Services"></div>
         </aside>
@@ -112,11 +118,9 @@
             <div id="detail-actions" class="detail-actions"></div>
           </div>
           <div id="v-stats" class="mini-stats"></div>
-          <div class="log-head">
+          <div class="log-tools">
             <h3>Logs</h3>
             <div id="v-files" class="tabs" role="tablist"></div>
-          </div>
-          <div class="log-tools">
             <input id="filter" type="search" placeholder="Filter lines" autocomplete="off" spellcheck="false">
             <div class="seg" role="group" aria-label="Which lines">
               <button id="log-all" type="button">All</button>
@@ -241,7 +245,7 @@
           <h2 id="security-headline">Security</h2>
           <p id="security-meta" class="lede"></p>
         </div>
-        <button id="security-refresh" type="button" class="btn">Refresh</button>
+        <button id="security-refresh" type="button" class="btn">Collect now</button>
       </div>
       <div id="security-notes"></div>
       <div id="security-actions" class="action-grid"></div>

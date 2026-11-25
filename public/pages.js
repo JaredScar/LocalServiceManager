@@ -20,8 +20,42 @@
     return `${Math.round(s / 86400)}d ago`;
   }
 
-  const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const n = (v) => (typeof v === 'number' ? v.toLocaleString() : '—');
+
+  function svgIcon(pathD, size) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('d', pathD);
+    svg.append(path);
+    return svg;
+  }
+
+  function globeIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('aria-hidden', 'true');
+    const add = (tag, attrs) => {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+      svg.append(node);
+    };
+    add('circle', { cx: '12', cy: '12', r: '8.25', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' });
+    add('ellipse', { cx: '12', cy: '12', rx: '3.4', ry: '8.25', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' });
+    add('path', { d: 'M4 12h16M5.2 8.2h13.6M5.2 15.8h13.6', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' });
+    return svg;
+  }
+
+  function lockIcon() {
+    return svgIcon('M12 2.5a4 4 0 0 0-4 4V9H7a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.5-1.5v-8A1.5 1.5 0 0 0 17 9h-1V6.5a4 4 0 0 0-4-4zm-2 6.5V6.5a2 2 0 1 1 4 0V9h-4z', 14);
+  }
 
   function table(headers, rows, emptyText) {
     const t = el('table', 'table');
@@ -144,6 +178,35 @@
       return box;
     }
 
+    function stoppedAt(name) {
+      const hist = cache.history;
+      const row = hist && hist.services && hist.services[name];
+      if (!row || !row.cpu) return null;
+      for (let i = row.cpu.length - 1; i > 0; i--) {
+        if (typeof row.cpu[i] !== 'number' && typeof row.cpu[i - 1] === 'number') return hist.times[i];
+      }
+      return null;
+    }
+
+    function serviceNode(s, tone) {
+      const stopped = s.state === 'Stopped';
+      const node = el('div', 'node' + (stopped || tone === 'bad' ? ' bad' : '') + (stopped ? ' dim' : ''));
+      const title = el('strong');
+      title.append(el('i', 'dot ' + (stopped || tone === 'bad' ? 'bad' : 'ok')));
+      title.append(document.createTextNode(s.label));
+      node.append(title);
+      let sub = '';
+      if (stopped) {
+        const at = stoppedAt(s.name);
+        sub = at ? `stopped since ${clock(at)}` : 'stopped';
+      } else {
+        sub = runningBits(s);
+        if (s.isSelf) sub = sub ? `${sub} · this app` : 'this app';
+      }
+      if (sub) node.append(el('span', null, sub));
+      return node;
+    }
+
     function renderMap() {
       const host = $('traffic-map');
       host.replaceChildren();
@@ -158,41 +221,103 @@
       const ips = attacks ? attacks.totals.uniqueIps || 0 : 0;
       const youIp = (sec.trustedIps && sec.trustedIps[0]) || '';
 
-      const pub = ports.rows.filter((r) => r.status === 'open-expected' || r.status === 'open-unexpected' || r.status === 'restricted');
-      const expected = pub.filter((r) => r.status === 'open-expected');
-      const merged = [];
-      for (const r of pub.filter((row) => row.status !== 'open-expected')) {
-        const key = `${r.status}|${r.port}`;
-        if (merged.some((m) => m.key === key)) continue;
-        merged.push({ key, row: r });
-      }
-      const flows = [];
+      const dedupe = (list) => {
+        const out = [];
+        for (const r of list) {
+          if (out.some((m) => m.port === r.port && m.status === r.status)) continue;
+          out.push(r);
+        }
+        return out;
+      };
+      const expected = dedupe(ports.rows.filter((r) => r.status === 'open-expected'));
+      const unexpected = dedupe(ports.rows.filter((r) => r.status === 'open-unexpected'));
+      const restricted = dedupe(ports.rows.filter((r) => r.status === 'restricted'));
+      const shown = new Set();
+      const internet = [];
+      const you = [];
+
+      const pipeFor = (portsList, note, kind) => ({
+        kind,
+        text: `${[...new Set(portsList)].map((p) => `:${p}`).join(' · ')} ${note}`,
+      });
+
       if (expected.length) {
         const svc = findService(expected.flatMap((r) => r.services));
-        const portsOnly = [...new Set(expected.map((r) => r.port))];
-        flows.push({
-          kind: 'ok',
-          from: 'internet',
-          pipe: portsOnly.map((p) => `:${p}`).join(' · '),
-          note: 'open, expected',
-          title: svc ? svc.label : expected[0].process || 'Public',
-          sub: svc ? (svc.state === 'Running' ? runningBits(svc) : svc.state) : '',
-          name: svc && svc.name,
+        const expectedPorts = expected.map((r) => r.port).sort((a, b) => Number(b === 443) - Number(a === 443) || a - b);
+        internet.push({
+          pipe: pipeFor(expectedPorts, 'open, expected', 'ok'),
+          node: svc ? serviceNode(svc, 'ok') : flowBox('ok', expected[0].process || 'Public', ''),
+          linkDown: false,
         });
+        if (svc) shown.add(svc.name);
       }
-      for (const { row: r } of merged) {
+
+      const named = new Set();
+      for (const r of unexpected.concat(restricted)) for (const name of r.services || []) named.add(String(name).toLowerCase());
+      const fronted = SD.services.filter((s) => s.state === 'Running' && !s.isSelf && !shown.has(s.name) && !named.has(s.name.toLowerCase()));
+      if (fronted.length && internet.length) internet[0].linkDown = true;
+      for (const s of fronted) {
+        internet.push({ pipe: null, node: serviceNode(s, 'ok') });
+        shown.add(s.name);
+      }
+
+      const managed = new Map();
+      const unmanaged = [];
+      for (const r of unexpected) {
         const svc = findService(r.services);
-        const restricted = r.status === 'restricted';
-        flows.push({
-          kind: restricted ? 'you' : 'bad',
-          from: restricted ? 'you' : 'internet',
-          pipe: `:${r.port}`,
-          note: restricted ? 'only your IP' : 'should be closed',
-          title: svc ? svc.label : r.port === 3389 ? 'Remote Desktop' : baseName(r.path) || r.process || `Port ${r.port}`,
-          sub: svc ? (svc.state === 'Running' ? runningBits(svc) : svc.state) : r.process || '',
-          name: svc && svc.name,
-          dashed: !svc && !restricted,
-        });
+        if (!svc) {
+          unmanaged.push(r);
+          continue;
+        }
+        const cur = managed.get(svc.name) || { svc, ports: [] };
+        if (!cur.ports.includes(r.port)) cur.ports.push(r.port);
+        managed.set(svc.name, cur);
+      }
+      for (const { svc, ports: svcPorts } of managed.values()) {
+        internet.push({ pipe: pipeFor(svcPorts, 'should be closed', 'bad'), node: serviceNode(svc, 'bad') });
+        shown.add(svc.name);
+      }
+
+      for (const s of SD.services) {
+        if (shown.has(s.name)) continue;
+        internet.push({ pipe: null, node: serviceNode(s, s.state === 'Stopped' ? 'bad' : 'ok') });
+        shown.add(s.name);
+      }
+
+      if (unmanaged.length) {
+        const procs = [...new Set(unmanaged.map((r) => baseName(r.path) || r.process).filter(Boolean))];
+        const node = el('div', 'node dim');
+        const title = el('strong');
+        title.append(el('i', 'dot warn'), document.createTextNode('Not a managed service'));
+        node.append(title, el('span', null, procs.join(' · ') || 'listening publicly'));
+        internet.push({ pipe: pipeFor(unmanaged.map((r) => r.port), 'open unexpectedly', 'bad'), node });
+      }
+
+      const youGroups = new Map();
+      for (const r of restricted) {
+        const key = r.port === 3389 ? 'rdp' : String(r.port);
+        const cur = youGroups.get(key) || { ports: [], row: r };
+        if (!cur.ports.includes(r.port)) cur.ports.push(r.port);
+        youGroups.set(key, cur);
+      }
+      for (const { ports: youPorts, row } of youGroups.values()) {
+        const svc = findService(row.services);
+        const node = svc
+          ? serviceNode(svc, 'ok')
+          : (() => {
+            const box = el('div', 'node');
+            const title = el('strong');
+            title.append(el('i', 'dot ok'), document.createTextNode(row.port === 3389 ? 'Remote Desktop' : baseName(row.path) || row.process || `Port ${row.port}`));
+            box.append(title);
+            if (row.process) box.append(el('span', null, row.process));
+            return box;
+          })();
+        you.push({ pipe: pipeFor(youPorts, 'only your IP', 'ok'), node });
+      }
+
+      if (!internet.length && !you.length) {
+        host.append(el('p', 'muted', 'No listeners to draw.'));
+        return;
       }
 
       const map = el('div', 'tmap2');
@@ -204,44 +329,42 @@
         head.append(s);
       });
       map.append(head);
-
       const place = (node, col, row, span) => {
         node.style.gridColumn = String(col);
         node.style.gridRow = span > 1 ? `${row} / span ${span}` : String(row);
         map.append(node);
       };
-      const paint = (group, startRow) => {
-        if (!group.length) return startRow;
-        if (group[0].from === 'you') {
-          place(flowBox('you', 'You', youIp || 'a trusted address'), 1, startRow, group.length);
-        } else {
-          const sub = failed ? `${n(failed)} failed attempts today${ips ? ` from ${n(ips)} IPs` : ''}` : 'Public traffic';
-          place(flowBox(failed ? 'bad' : 'ok', 'The internet', sub), 1, startRow, group.length);
-        }
-        group.forEach((f, i) => {
-          const pipe = el('div', 'pipe ' + (f.kind === 'bad' ? 'bad' : 'ok'));
-          pipe.append(el('span', null, `${f.pipe} ${f.note}`));
-          const node = el('div', 'node' + (f.dashed ? ' dim' : '') + (f.kind === 'bad' ? ' bad' : ''));
-          node.append(el('strong', null, f.title));
-          if (f.sub) node.append(el('span', null, f.sub));
-          place(pipe, 2, startRow + i, 1);
-          place(node, 3, startRow + i, 1);
-        });
-        return startRow + group.length;
+      const chip = (pipe) => {
+        const elPipe = el('div', 'pipe ' + pipe.kind);
+        elPipe.append(el('span', null, pipe.text));
+        return elPipe;
       };
-      let row = 2;
-      row = paint(flows.filter((f) => f.from === 'internet'), row);
-      row = paint(flows.filter((f) => f.from === 'you'), row);
+      const paint = (group, start, source) => {
+        group.forEach((row, i) => {
+          if (row.pipe) place(chip(row.pipe), 2, start + i, 1);
+          if (row.linkDown) row.node.classList.add('linked');
+          place(row.node, 3, start + i, 1);
+        });
+        if (group.length && source) place(source, 1, start, group.length);
+      };
 
-      const shown = new Set(flows.map((f) => f.name).filter(Boolean));
-      const locals = SD.services.filter((s) => !shown.has(s.name));
-      locals.forEach((s, i) => {
-        const node = el('div', 'node dim' + (s.state === 'Stopped' ? ' bad' : ''));
-        node.append(el('strong', null, s.label));
-        node.append(el('span', null, s.state === 'Running' ? runningBits(s) || 'running' : s.state === 'Stopped' ? 'stopped' : s.state));
-        place(node, 3, row + i, 1);
-      });
-      if (!flows.length && !locals.length) map.append(el('p', 'muted', 'No listeners to draw.'));
+      const net = el('div', 'flow-box bad internet');
+      const netTitle = el('strong', 'net-title');
+      netTitle.append(globeIcon(), document.createTextNode('The internet'));
+      net.append(netTitle);
+      if (failed) net.append(el('div', 'big-num', n(failed)));
+      net.append(el('span', null, failed ? `failed attempts today${ips ? ` from ${n(ips)} IPs` : ''}` : 'Public traffic'));
+      const lines = [];
+      if (attacks && attacks.totals.windows) lines.push(`${n(attacks.totals.windows)} stopped at the firewall`);
+      if (attacks && attacks.totals.mariadb) lines.push(`${n(attacks.totals.mariadb)} reached the database`);
+      if (attacks && attacks.totals.web) lines.push(`${n(attacks.totals.web)} scanned the web`);
+      if (lines.length) {
+        const ul = el('ul', 'net-lines');
+        lines.forEach((text) => ul.append(el('li', null, text)));
+        net.append(ul);
+      }
+      paint(internet, 2, internet.length ? net : null);
+      paint(you, 2 + internet.length, you.length ? flowBox('you', 'You', youIp || 'a trusted address') : null);
       host.append(map);
     }
 
@@ -274,7 +397,8 @@
         logs.href = `#/services/${encodeURIComponent(s.name)}`;
         actions.append(logs);
         const how = s.startMode === 'Auto' ? 'It is set to start automatically, but it has not come back on its own.' : 'It stays stopped until you start it.';
-        items.push(needCard('Service down', `${s.label} stopped`, how, actions));
+        const at = stoppedAt(s.name);
+        items.push(needCard('Service down', at ? `${s.label} stopped at ${clock(at)}` : `${s.label} stopped`, how, actions));
       }
 
       const rows = cache.security && cache.security.ports ? cache.security.ports.rows : [];
@@ -285,8 +409,9 @@
         const svc = findService(primary.services);
         const name = svc ? svc.label : baseName(primary.path) || primary.process || `Port ${primary.port}`;
         const maria = cache.security.attacks && primary.port === 3306 ? cache.security.attacks.totals.mariadb : 0;
+        const fromIps = cache.security.attacks ? cache.security.attacks.totals.uniqueIps : 0;
         const body = maria
-          ? `${n(maria)} login attempts reached it. Bind it to 127.0.0.1, or block port ${primary.port}.`
+          ? `${n(maria)} login attempts${fromIps ? ` from ${n(fromIps)} IPs` : ''} today. Bind it to 127.0.0.1 and block port ${primary.port}.`
           : `It is listening on 0.0.0.0:${primary.port}. Bind it to 127.0.0.1, or block the port.`;
         const actions = el('div', 'need-actions');
         const fix = el('a', 'btn btn-primary', 'Show me the fix');
@@ -316,45 +441,52 @@
       if (!items.length) needs.append(needCard('', 'Nothing is waiting on you', 'Services, sites, and the firewall look settled.'));
       else needs.append(...items);
 
+      const looks = [];
       if (rest.length) {
-        const card = el('article', 'look-card');
-        card.append(el('h3', null, rest.map((r) => `:${r.port}`).join(' and ') + (rest.length === 1 ? ' is open' : ' are open')));
-        card.append(el('p', null, 'Public, and not in the expected list. The Security page has a block command for each.'));
-        const link = el('a', 'text-link', 'Review');
-        link.href = '#/security';
-        card.append(link);
-        worth.append(card);
+        const names = [...new Set(rest.map((r) => baseName(r.path) || r.process).filter(Boolean))];
+        looks.push({
+          swatch: 'warn',
+          title: rest.map((r) => `:${r.port}`).join(' and ') + (rest.length === 1 ? ' is open' : ' are open'),
+          body: `${names.join(' and ') || 'These listeners'} ${names.length === 1 ? 'is' : 'are'} public, and not in the expected list.`,
+          href: '#/security',
+          link: 'Review',
+        });
       }
-
       const updates = SD.maintenance && SD.maintenance.updates;
       if (updates && updates.count) {
-        const card = el('article', 'look-card');
-        card.append(el('h3', null, 'Windows update ready'));
         const titles = Array.isArray(updates.titles) ? updates.titles.filter(Boolean) : [];
-        card.append(el('p', null, titles[0] || `${updates.count} pending`));
-        worth.append(card);
+        looks.push({ swatch: 'dim', title: 'Windows update ready', body: titles[0] || `${updates.count} pending` });
       } else if (SD.maintenance && SD.maintenance.rebootPending) {
-        const card = el('article', 'look-card');
-        card.append(el('h3', null, 'A reboot is pending'));
-        card.append(el('p', null, 'Windows is waiting to finish installing updates.'));
-        worth.append(card);
+        looks.push({ swatch: 'dim', title: 'A reboot is pending', body: 'Windows is waiting to finish installing updates.' });
       }
-
       for (const site of sites) {
         const days = site.cert && site.cert.daysLeft;
         if (typeof days === 'number' && days <= 14 && site.cert.authorized !== false) {
-          const card = el('article', 'look-card');
-          card.append(el('h3', null, `${site.name} certificate`));
-          card.append(el('p', null, days < 0 ? 'The certificate has expired.' : `Expires in ${days} day${days === 1 ? '' : 's'}.`));
-          worth.append(card);
+          looks.push({
+            swatch: days < 0 ? 'bad' : 'warn',
+            title: `${site.name} certificate`,
+            body: days < 0 ? 'The certificate has expired.' : `Expires in ${days} day${days === 1 ? '' : 's'}.`,
+          });
         }
       }
-      if (!worth.childNodes.length) {
-        const card = el('article', 'look-card');
-        card.append(el('h3', null, 'Nothing else standing out'));
-        card.append(el('p', null, 'No pending updates or certificates due soon.'));
-        worth.append(card);
+      if (!looks.length) looks.push({ swatch: 'dim', title: 'Nothing else standing out', body: 'No pending updates or certificates due soon.' });
+      const lookCard = el('article', 'look-card');
+      for (const item of looks) {
+        const row = el('div', 'look-row');
+        const text = el('div');
+        const heading = el('h3');
+        heading.append(el('i', 'swatch ' + item.swatch), document.createTextNode(item.title));
+        text.append(heading);
+        if (item.body) text.append(el('p', null, item.body));
+        row.append(text);
+        if (item.href) {
+          const link = el('a', 'text-link', item.link || 'Review');
+          link.href = item.href;
+          row.append(link);
+        }
+        lookCard.append(row);
       }
+      worth.append(lookCard);
 
       const stopped = SD.services.filter((s) => s.state === 'Stopped').length;
       const running = SD.services.filter((s) => s.state === 'Running').length;
@@ -375,7 +507,7 @@
       if (sys && sys.memTotalMB) bits.push(`memory ${Math.round(((sys.memTotalMB - sys.memFreeMB) / sys.memTotalMB) * 100)}%`);
       if (sys && sys.disks && sys.disks[0] && sys.disks[0].sizeGB) {
         const d = sys.disks[0];
-        bits.push(`disk ${Math.round(((d.sizeGB - d.freeGB) / d.sizeGB) * 100)}%`);
+        bits.push(`disk ${Math.round(((d.sizeGB - d.freeGB) / d.sizeGB) * 100)}% used`);
       }
       if (sys && sys.bootTime) bits.push(`up ${fmtDuration(sys.bootTime)}`);
       $('overview-sub').textContent = bits.join(' · ');
@@ -442,9 +574,13 @@
         box.append(row);
       }
       const a = attacks;
-      $('timeline-sub').textContent = a
-        ? `${n(a.totals.windows)} failed Windows logins${a.totals.lockouts ? ` and ${n(a.totals.lockouts)} lockouts` : ''}.`
-        : '';
+      const rdpLocked = cache.security && cache.security.ports && cache.security.ports.rows.some((r) => r.port === 3389 && r.status === 'restricted');
+      const day = [];
+      if (a && a.totals.windows) {
+        day.push(`${n(a.totals.windows)} failed Windows logins${a.totals.uniqueIps ? ` from ${n(a.totals.uniqueIps)} IPs` : ''}${a.totals.lockouts ? ` and ${n(a.totals.lockouts)} account lockouts` : ''}`);
+      }
+      if (rdpLocked) day.push('Remote Desktop only accepts your IP, so none got through');
+      $('timeline-sub').textContent = day.length ? `All day: ${day.join('. ')}.` : '';
     }
 
     function meterRow(label, right, pct, sub) {
@@ -476,7 +612,8 @@
           const nums = hist.system.cpu.filter((v) => typeof v === 'number');
           if (nums.length) peak = Math.max(...nums);
         }
-        server.append(meterRow('CPU', `${Math.round(cpu)}%`, cpu, peak !== null ? `peak ${Math.round(peak)}%` : `${sys.logicalCpus || ''} threads`.trim()));
+        const cpuRight = peak !== null ? `${Math.round(cpu)}% · peak ${Math.round(peak)}%` : `${Math.round(cpu)}%`;
+        server.append(meterRow('CPU', cpuRight, cpu));
         if (sys.memTotalMB) {
           const used = sys.memTotalMB - sys.memFreeMB;
           const pct = (used / sys.memTotalMB) * 100;
@@ -498,16 +635,21 @@
         const up = s.last && s.last.up;
         row.append(el('span', 'dot ' + (!s.last ? 'dim' : up ? 'ok' : 'bad')));
         const grow = el('span', 'grow');
-        grow.append(el('strong', null, s.name));
+        let hostName = s.name;
+        try { hostName = new URL(s.url).host; } catch { /* keep the configured name */ }
+        grow.append(el('strong', null, hostName));
         const days = s.cert && typeof s.cert.daysLeft === 'number' ? s.cert.daysLeft : null;
         if (days !== null && (soonest === null || days < soonest)) soonest = days;
-        grow.append(el('em', null, days === null ? '' : `certificate ${days < 0 ? 'expired' : days + ' days'}`));
         row.append(grow);
         const right = el('span', 'muted small', s.last && typeof s.last.ms === 'number' ? `${s.last.ms} ms` : '—');
         row.append(right, el('span', 'muted small', s.uptimePct !== null && s.uptimePct !== undefined ? `${s.uptimePct}%` : ''));
         sitesBox.append(row);
       }
-      if (soonest !== null) sitesBox.append(el('p', 'muted small', soonest < 0 ? 'A certificate has expired.' : `Certificates expire in ${soonest} days at the soonest.`));
+      if (soonest !== null) {
+        const soon = sites.find((s) => s.cert && s.cert.daysLeft === soonest && s.cert.validTo);
+        const when = soon ? new Date(soon.cert.validTo).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+        sitesBox.append(el('p', 'muted small', soonest < 0 ? 'A certificate has expired.' : when ? `Certificates expire ${when}, in ${soonest} days.` : `Certificates expire in ${soonest} days at the soonest.`));
+      }
     }
 
     function render() {
@@ -611,20 +753,26 @@
       container.replaceChildren();
       const span = Math.max(1, to - from);
       const sorted = events.filter((e) => e.t >= from && e.t <= to).sort((a, b) => a.t - b.t);
-      let lastPct = -100;
-      let lastLane = 0;
+      const placed = [];
+      let maxLane = 0;
       for (const ev of sorted) {
         const pctPos = ((ev.t - from) / span) * 100;
+        const end = pctPos > 78;
+        const start = pctPos < 12;
+        const width = Math.min(36, 8 + String(ev.label).length * 0.42);
+        const left = end ? pctPos - width : pctPos;
+        const right = end ? pctPos : Math.min(100, pctPos + width);
         let lane = 0;
-        if (pctPos - lastPct < 14) lane = lastLane === 0 ? 1 : 0;
-        lastPct = pctPos;
-        lastLane = lane;
-        const edge = pctPos > 78 ? ' end' : pctPos < 14 ? ' start' : '';
-        const pin = el('div', 'pin ' + (ev.kind || '') + (lane ? ' lane' : '') + edge);
+        while (placed.some((p) => p.lane === lane && left < p.right && right > p.left)) lane += 1;
+        placed.push({ lane, left, right });
+        maxLane = Math.max(maxLane, lane);
+        const pin = el('div', 'pin ' + (ev.kind || '') + (end ? ' end' : start ? ' start' : ''));
         pin.style.left = `${pctPos}%`;
+        pin.style.top = `${lane * 22}px`;
         pin.append(el('span', 'pin-dot'), el('span', 'pin-label', ev.label));
         container.append(pin);
       }
+      container.style.height = sorted.length ? `${20 + maxLane * 22}px` : '0px';
     }
 
     function draw(d) {
@@ -676,10 +824,13 @@
           const prev = typeof values[i - 1] === 'number';
           const cur = typeof values[i] === 'number';
           if (prev === cur || d.times[i] < from) continue;
+          const when = clock(d.times[i]);
+          const words = `${labelFor(name)} ${cur ? 'restarted' : 'stopped'}`;
+          const pctPos = ((d.times[i] - from) / Math.max(1, to - from)) * 100;
           pinEvents.push({
             t: d.times[i],
             kind: cur ? 'ok' : 'bad',
-            label: `${labelFor(name)} ${cur ? 'restarted' : 'stopped'} ${clock(d.times[i])}`,
+            label: pctPos > 78 ? `${when} ${words}` : `${words} ${when}`,
           });
         }
       }
@@ -692,7 +843,8 @@
         memSub = `${(used / 1024).toFixed(0)} of ${(sys.memTotalMB / 1024).toFixed(0)} GB`;
       }
       $('mem-sub').textContent = memSub;
-      metrics('mem-metrics', [['Now', pct(memStats.now)], ['Peak', memStats.peak !== null ? `${memStats.peak.toFixed(1)}%` : '—']]);
+      metrics('mem-metrics', [['', memStats.now !== null ? `${memStats.now.toFixed(1)}%` : '—'], ['', memStats.peak !== null ? `peak ${memStats.peak.toFixed(1)}%` : '']]);
+      $('mem-metrics').classList.add('hero');
       charts.push(Charts.line($('chart-mem'), {
         times: mem.times,
         series: [{ name: 'Memory', values: mem.values, color: SERIES[0] }],
@@ -712,7 +864,8 @@
       const drive = (sys && sys.disks && sys.disks[0]) || null;
       $('disk-title').textContent = drive ? `Disk ${drive.drive}` : drives[0] ? `Disk ${drives[0]}` : 'Disk';
       $('disk-sub').textContent = drive ? `${Math.round(drive.freeGB).toLocaleString()} GB free of ${Math.round(drive.sizeGB).toLocaleString()} GB` : '';
-      metrics('disk-metrics', [['Now', diskNow.length ? `${diskNow[0].toFixed(1)}%` : '—'], ['Peak', diskPeak !== null ? `${diskPeak.toFixed(1)}%` : '—']]);
+      metrics('disk-metrics', [['', diskNow.length ? `${diskNow[0].toFixed(1)}%` : '—'], ['', diskPeak !== null ? `peak ${diskPeak.toFixed(1)}%` : '']]);
+      $('disk-metrics').classList.add('hero');
       const diskTimes = take(d.times, drives[0] ? d.system.disk[drives[0]] : [], from).times;
       charts.push(Charts.line($('chart-disk'), {
         times: diskTimes.length ? diskTimes : cpu.times,
@@ -737,7 +890,19 @@
         const tr = el('tr');
         const nameCell = el('td', 'name' + (stopped ? ' down' : ''));
         nameCell.append(el('strong', null, labelFor(name)));
-        const note = stopped ? 'stopped' : c.peak !== null && c.now !== null && c.peak > (c.avg || 0) * 2 && c.peak >= 20 ? `busiest at ${clock(cpuS.times[cpuS.values.indexOf(c.peak)] || from)}` : '';
+        let stoppedAtTs = null;
+        let restartedAt = null;
+        for (let i = 1; i < cpuS.values.length; i++) {
+          const prevOn = typeof cpuS.values[i - 1] === 'number';
+          const curOn = typeof cpuS.values[i] === 'number';
+          if (prevOn && !curOn) stoppedAtTs = cpuS.times[i];
+          if (!prevOn && curOn) restartedAt = cpuS.times[i];
+        }
+        const busy = c.peak !== null && c.now !== null && c.peak > (c.avg || 0) * 2 && c.peak >= 20;
+        let note = '';
+        if (stopped) note = stoppedAtTs ? `stopped at ${clock(stoppedAtTs)}` : 'stopped';
+        else if (busy) note = `busiest at ${clock(cpuS.times[cpuS.values.indexOf(c.peak)] || from)}`;
+        else if (restartedAt) note = `restarted at ${clock(restartedAt)}`;
         if (note) nameCell.append(el('span', null, note));
         tr.append(nameCell);
 
@@ -846,12 +1011,14 @@
         return box;
       }
       const days = c.daysLeft;
-      const when = c.validTo ? new Date(c.validTo).toLocaleDateString() : '';
+      const when = c.validTo ? new Date(c.validTo).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
       const issuer = c.issuer ? ` · issued by ${c.issuer}` : '';
       const level = days === null ? '' : days <= 7 ? 'bad' : days <= 14 ? 'warn' : '';
       if (level) box.classList.add(level);
-      const title = days === null ? 'Certificate present' : days < 0 ? 'Certificate has expired' : `Certificate valid for ${days} more day${days === 1 ? '' : 's'}`;
-      box.append(el('strong', null, title), el('span', null, `Expires ${when}${issuer}`));
+      const titleText = days === null ? 'Certificate present' : days < 0 ? 'Certificate has expired' : `Certificate valid for ${days} more day${days === 1 ? '' : 's'}`;
+      const title = el('strong');
+      title.append(lockIcon(), document.createTextNode(titleText));
+      box.append(title, el('span', null, `Expires ${when}${issuer}`));
       return box;
     }
 
@@ -947,7 +1114,7 @@
         list.append(card);
         charts.push(Charts.line(sparkBox, {
           times, series: [{ name: 'Response time', values, color: SERIES[0] }],
-          from, to, format: (v) => `${Math.round(v)} ms`, height: 92, compact: true, area: true,
+          from, to, format: (v) => `${Math.round(v)} ms`, height: 110, compact: true, xLabels: true, area: true,
           gapMs: 24 * 3600e3,
           ariaLabel: `${s.name} response time, last 24 hours`,
         }));
@@ -1057,6 +1224,13 @@
       return row.process || `port ${row.port}`;
     }
 
+    function copyChip(label, text) {
+      const b = el('button', 'btn btn-sm', label);
+      b.type = 'button';
+      b.addEventListener('click', () => copy(text, 'the firewall command'));
+      return b;
+    }
+
     function renderActions(data) {
       const box = $('security-actions');
       box.replaceChildren();
@@ -1068,38 +1242,64 @@
         box.append(card);
         return;
       }
-      const primary = rows.find((r) => [1433, 3306, 5432, 6379, 9200, 27017].includes(r.port)) || rows[0];
-      const rest = rows.filter((r) => r !== primary);
+      const seen = new Set();
+      const unique = [];
+      for (const r of rows) {
+        if (seen.has(r.port)) continue;
+        seen.add(r.port);
+        unique.push(r);
+      }
+      const primary = unique.find((r) => [1433, 3306, 5432, 6379, 9200, 27017].includes(r.port)) || unique[0];
+      const rest = unique.filter((r) => r !== primary);
       const name = exposureName(primary);
+      const attempts = data.attacks && primary.port === 3306 ? data.attacks.totals.mariadb : 0;
+      const fromIps = data.attacks ? data.attacks.totals.uniqueIps : 0;
       const card = el('section', 'card fix-card');
-      card.append(el('p', 'kicker bad', 'First'));
+      card.append(el('p', 'kicker bad', 'Fix first'));
       card.append(el('h3', null, `Close ${name} on the internet`));
-      card.append(el('p', null, `${name} is reachable on port ${primary.port}. Two ways to close that.`));
+      card.append(el('p', null, attempts
+        ? `${n(attempts)} login attempts${fromIps ? ` from ${n(fromIps)} IPs` : ''} reached it today. Two changes close it for good.`
+        : `${name} is reachable on port ${primary.port}. Two changes close that.`));
       const steps = el('ol', 'steps');
       const one = el('li');
-      one.append(el('strong', null, `1. If ${name} should only be used on this server, bind it to 127.0.0.1.`));
+      one.append(el('strong', null, `1. If ${name} should only be used on this server, bind it to 127.0.0.1, then restart it.`));
+      one.append(commandRow('bind-address = 127.0.0.1'));
       const two = el('li');
       two.append(el('strong', null, '2. Block the port in Windows Firewall (PowerShell, as admin).'));
       two.append(commandRow(blockCmd(primary.port, primary.proto)));
       steps.append(one, two);
       card.append(steps);
+      const svcName = primary.services && primary.services[0];
+      if (svcName) {
+        const go = el('a', 'btn', `Go to ${labelFor(svcName)}`);
+        go.href = `#/services/${encodeURIComponent(svcName)}`;
+        card.append(go);
+      }
       box.append(card);
 
+      const other = el('section', 'card fix-card');
       if (rest.length) {
-        const other = el('section', 'card fix-card');
+        const procs = [...new Set(rest.map((r) => r.process).filter(Boolean))];
         other.append(el('p', 'kicker muted', 'Then'));
         other.append(el('h3', null, `${rest.map((r) => ':' + r.port).join(' and ')} ${rest.length === 1 ? 'is' : 'are'} open too`));
-        other.append(el('p', null, 'These are public and are not in expectedPublicPorts.'));
-        const ol = el('ol', 'steps');
-        rest.forEach((r, i) => {
-          const li = el('li');
-          li.append(el('strong', null, `${i + 1}. ${exposureName(r)} on ${r.port}/${String(r.proto).toLowerCase()}`));
-          li.append(commandRow(blockCmd(r.port, r.proto)));
-          ol.append(li);
-        });
-        other.append(ol);
-        box.append(other);
+        other.append(el('p', null, `${procs.join(' and ') || 'These programs'} listen where they should not. Bind them to 127.0.0.1, or block the ports.`));
+        const actions = el('div', 'need-actions');
+        rest.forEach((r) => actions.append(copyChip(`Copy block rule for :${r.port}`, blockCmd(r.port, r.proto))));
+        other.append(actions);
       }
+      const blocked = data.ports.rows.filter((r) => r.status === 'blocked');
+      const rdp = data.ports.rows.find((r) => r.port === 3389 && r.status === 'restricted');
+      if (rdp || blocked.length || (data.attacks && data.attacks.totals.windows)) {
+        const hold = el('div', 'holding');
+        hold.append(el('strong', null, 'Holding up well'));
+        const bits = [];
+        if (data.attacks && data.attacks.totals.windows) bits.push(`${n(data.attacks.totals.windows)} Windows login attempts today, all stopped`);
+        if (rdp) bits.push(`Remote Desktop only accepts ${(data.trustedIps || []).join(', ') || 'your IP'}`);
+        if (blocked.length) bits.push(`${[...new Set(blocked.map((r) => r.port))].slice(0, 4).join(', ')} are blocked`);
+        hold.append(el('p', null, `${bits.join('. ')}.`));
+        other.append(hold);
+      }
+      if (other.childNodes.length) box.append(other);
     }
 
     function renderPorts(data) {
@@ -1173,17 +1373,20 @@
       const a = data.attacks;
       if (!a) return;
       const stats = $('attack-stats');
-      const stat = (value, label, sub) => {
+      const stat = (value, label, sub, tone) => {
         const t = el('div', 'stat');
-        t.append(el('div', 'stat-value', value), el('div', 'stat-label', label));
+        const num = el('div', 'stat-value' + (tone ? ' ' + tone : ''), value);
+        const lab = el('div', 'stat-label');
+        lab.append(el('i', 'swatch ' + (tone || 'dim')), document.createTextNode(label));
+        t.append(num, lab);
         if (sub) t.append(el('div', 'stat-sub', sub));
         return t;
       };
       stats.replaceChildren(
-        stat(n(a.totals.windows), 'Failed sign-ins', a.sources.windows ? 'Windows and Remote Desktop' : 'collector data unavailable'),
-        stat(n(a.totals.web), 'Web probes', a.sources.web ? '4xx and scanner paths' : 'Caddy logs not readable'),
-        stat(n(a.totals.mariadb), 'Database attempts', a.sources.mariadb ? 'from outside addresses' : 'MariaDB log not readable'),
-        stat(n(a.totals.uniqueIps), 'Source addresses', 'not counting your trusted IPs')
+        stat(n(a.totals.windows), 'Windows logins refused', a.totals.lockouts ? `${n(a.totals.lockouts)} account lockouts` : 'Windows and Remote Desktop', 'blue'),
+        stat(n(a.totals.mariadb), 'MariaDB login attempts', a.sources.mariadb ? 'reached the database' : 'MariaDB log not readable', 'warn'),
+        stat(n(a.totals.web), 'Web probes', a.sources.web ? 'scanner paths' : 'Caddy logs not readable', 'ok'),
+        stat(n(a.totals.uniqueIps), 'Hostile IPs', 'not counting your own', '')
       );
 
       const series = [

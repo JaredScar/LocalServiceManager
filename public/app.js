@@ -126,17 +126,84 @@ function numText(v) {
 
 let usageHistory = null;
 let usageLoading = null;
-function loadUsage() {
-  if (usageHistory) return Promise.resolve(usageHistory);
+let deck = null;
+function loadDeck() {
+  if (deck) return Promise.resolve(deck);
   if (!usageLoading) {
-    usageLoading = api('/api/history')
-      .then((d) => {
-        usageHistory = d;
-        return d;
-      })
-      .catch(() => null);
+    usageLoading = Promise.all([
+      api('/api/history').catch(() => null),
+      api('/api/sites').catch(() => null),
+      api('/api/security').catch(() => null),
+    ]).then(([history, sites, security]) => {
+      deck = { history, sites, security };
+      usageHistory = history;
+      return deck;
+    });
   }
   return usageLoading;
+}
+function loadUsage() {
+  return loadDeck().then((d) => (d && d.history) || null);
+}
+
+function stoppedSince(name) {
+  const row = usageHistory && usageHistory.services && usageHistory.services[name];
+  if (!row || !row.cpu) return null;
+  for (let i = row.cpu.length - 1; i > 0; i--) {
+    if (typeof row.cpu[i] !== 'number' && typeof row.cpu[i - 1] === 'number') return usageHistory.times[i];
+  }
+  return null;
+}
+
+function siteHosts() {
+  const sites = (deck && deck.sites && deck.sites.sites) || [];
+  return sites.map((s) => {
+    try { return new URL(s.url).host; } catch { return s.name; }
+  });
+}
+
+function portsFor(name) {
+  const rows = deck && deck.security && deck.security.ports ? deck.security.ports.rows : [];
+  const ports = [];
+  for (const r of rows) {
+    if (r.status !== 'open-expected' && r.status !== 'open-unexpected') continue;
+    if (!(r.services || []).some((n) => String(n).toLowerCase() === String(name).toLowerCase())) continue;
+    if (!ports.includes(r.port)) ports.push(r.port);
+  }
+  return ports.sort((a, b) => a - b);
+}
+
+function fourthTile(s) {
+  const web = portsFor(s.name).filter((p) => p === 80 || p === 443);
+  if (web.length) {
+    const hosts = siteHosts();
+    return ['Connected to', hosts.length ? hosts.join(' and ') : 'the sites on this server', `public on ${web.map((p) => `:${p}`).join(' and ')}`];
+  }
+  const users = (s.dependents || []).filter((d) => d.status === 'Running').map((d) => {
+    const found = state.services.find((x) => x.name.toLowerCase() === String(d.name).toLowerCase());
+    return found ? found.label : d.name;
+  });
+  if (users.length) return ['Used by', users.join(', '), `needs ${s.label}`];
+  return ['Account', s.account ? s.account.replace(/\\/g, '\\\u200b') : '—', s.startMode === 'Auto' ? 'starts automatically' : s.startMode || ''];
+}
+
+function storyFor(s) {
+  if (!s || state.selected !== s.name || s.state !== 'Running') return;
+  const parts = [];
+  const web = portsFor(s.name).some((p) => p === 80 || p === 443);
+  const hosts = siteHosts();
+  if (web && hosts.length) parts.push(`Serving ${hosts.join(' and ')}.`);
+  const row = usageHistory && usageHistory.services && usageHistory.services[s.name];
+  const cpu = row && seriesPeakAt(row.cpu);
+  if (cpu && cpu.peak >= 15 && usageHistory.times[cpu.at]) {
+    const when = new Date(usageHistory.times[cpu.at]).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    parts.push(`Its busiest moment today was ${when}, when it hit ${numText(cpu.peak)}% CPU.`);
+  }
+  if (web) {
+    const scans = (state.lastLines || []).filter((line) => SCAN_RE.test(line)).length;
+    if (scans) parts.push(`${scans === 1 ? 'One scanner' : `${scans} scanners`} tried to fetch a sensitive path and were refused.`);
+  }
+  if (parts.length) $('v-sentence').textContent = parts.join(' ');
 }
 
 function seriesPeakAt(values) {
@@ -349,15 +416,15 @@ function renderDetail() {
     mini('CPU', running && s.cpuPercent !== null && s.cpuPercent !== undefined ? `${numText(s.cpuPercent)}%` : '—', running ? 'right now' : ''),
     mini('Memory', s.memoryMB !== null ? `${numText(s.memoryMB)} MB` : '—', ''),
     mini('Uptime', running ? fmtDuration(s.startedAt) : '—', running && s.startedAt ? `since ${new Date(s.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''),
-    mini('Account', s.account ? s.account.replace(/\\/g, '\\\u200b') : '—', s.startMode === 'Auto' ? 'starts automatically' : s.startMode || '')
+    (() => {
+      const tile = fourthTile(s);
+      return mini(tile[0], tile[1], tile[2]);
+    })()
   );
   const selected = s.name;
   loadUsage().then((d) => {
     if (!d || state.selected !== selected) return;
     const row = d.services && d.services[s.name];
-    if (!row) return;
-    const cpu = seriesPeakAt(row.cpu);
-    const mem = seriesPeakAt(row.mem);
     const tiles = [...stats.children];
     const setSub = (tile, text) => {
       if (!tile) return;
@@ -365,12 +432,18 @@ function renderDetail() {
       if (!em) tile.append((em = el('em', null, '')));
       em.textContent = text;
     };
-    if (cpu.peak !== null) setSub(tiles[0], `peak ${numText(cpu.peak)}% today`);
-    if (mem.peak !== null) setSub(tiles[1], `peak ${numText(mem.peak)} MB today`);
-    if (running && cpu.peak !== null && cpu.peak >= 15 && d.times[cpu.at]) {
-      const when = new Date(d.times[cpu.at]).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      $('v-sentence').textContent = `Its busiest moment today was ${when}, when it hit ${numText(cpu.peak)}% CPU.`;
+    if (row) {
+      const cpu = seriesPeakAt(row.cpu);
+      const mem = seriesPeakAt(row.mem);
+      if (cpu.peak !== null) setSub(tiles[0], `peak ${numText(cpu.peak)}% today`);
+      if (mem.peak !== null) setSub(tiles[1], `peak ${numText(mem.peak)} MB today`);
     }
+    const tile = fourthTile(s);
+    if (tiles[3]) {
+      tiles[3].replaceChildren(el('span', null, tile[0]), el('strong', null, tile[1]));
+      if (tile[2]) tiles[3].append(el('em', null, tile[2]));
+    }
+    storyFor(s);
   });
 
   const actions = $('detail-actions');
@@ -422,7 +495,10 @@ function renderServices() {
       if (s.cpuPercent !== null && s.cpuPercent !== undefined) sub.push(`${s.cpuPercent}%`);
       if (s.memoryMB !== null) sub.push(`${s.memoryMB} MB`);
       if (s.startedAt) sub.push(`up ${fmtDuration(s.startedAt)}`);
-    } else if (s.state === 'Stopped') sub.push('down');
+    } else if (s.state === 'Stopped') {
+      const at = stoppedSince(s.name);
+      sub.push(at ? `down since ${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'down');
+    }
     else sub.push(s.state);
     grow.append(el('strong', null, s.label), el('span', 'sub', sub.join(' · ')));
     row.append(el('span', 'dot ' + (s.state === 'Running' ? 'ok' : s.state === 'Stopped' ? 'bad' : 'dim')), grow);
@@ -432,6 +508,7 @@ function renderServices() {
     list.append(row);
   }
   if (!visible.length) list.append(el('p', 'muted small', state.services.length ? 'No services match.' : 'No services configured.'));
+  if (!deck) loadDeck().then(() => renderServices());
 
   const down = state.services.filter((s) => s.state === 'Stopped');
   const headline = $('services-headline');
@@ -617,7 +694,8 @@ async function loadLog(reset) {
     state.lastFileName = data.name;
     renderLog(reset);
     const note = data.truncated ? ` · showing last ${data.lines.length}` : '';
-    $('v-meta').textContent = `${data.name} · ${fmtBytes(data.size)}${note} · ${new Date().toLocaleTimeString()}`;
+    const updated = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    $('v-meta').textContent = `${data.name} · ${fmtBytes(data.size)}${note} · updated ${updated}`;
   } catch (e) {
     if (gen !== state.logGen) return;
     state.lastLines = [];
@@ -792,6 +870,8 @@ function renderLog(forceBottom) {
 
   if ($('follow').checked && (forceBottom || nearBottom)) logEl.scrollTop = logEl.scrollHeight;
   else logEl.scrollTop = prevTop;
+  const current = state.services.find((x) => x.name === state.selected);
+  if (current) storyFor(current);
 }
 
 function downloadLog() {

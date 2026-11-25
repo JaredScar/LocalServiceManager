@@ -72,7 +72,7 @@ const Charts = (() => {
 
     const render = (W) => {
       container.replaceChildren();
-      const pad = compact ? { l: 2, r: 2, t: 4, b: 4 } : { l: 40, r: 10, t: 10, b: 22 };
+      const pad = compact ? { l: 2, r: 2, t: 4, b: opts.xLabels ? 18 : 4 } : { l: 40, r: 10, t: 10, b: 22 };
       const pw = Math.max(10, W - pad.l - pad.r);
       const ph = height - pad.t - pad.b;
       const x = (t) => pad.l + ((t - from) / Math.max(1, to - from)) * pw;
@@ -91,7 +91,7 @@ const Charts = (() => {
         }
       }
       // x labels
-      if (!compact) {
+      if (!compact || opts.xLabels) {
         const span = to - from;
         const every = span > 12 * 3600e3 ? 6 : span > 4 * 3600e3 ? 2 : 1;
         for (const t of hourTicks(from, to, every)) {
